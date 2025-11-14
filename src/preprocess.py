@@ -18,7 +18,7 @@ def extract_audio_from_videos(video_dir: str, audio_dir: str, target_sr: int = 1
     Produces mono WAV files at target_sr in audio_dir with same base filenames.
     """
     ensure_dir(audio_dir)
-    if not _ffmpeg_exists():
+    if not ffmpeg_exists():
         raise RuntimeError("ffmpeg not found on PATH — required to extract audio. Install ffmpeg and retry.")
 
     video_exts = {".mp4"}
@@ -39,7 +39,7 @@ def preprocess_audio(audio_path: str, target_sr: int = 16000):
     This function is a small helper to resave a file at target_sr, mono using ffmpeg.
     Returns path to preprocessed file (overwrites original path).
     """
-    if not _ffmpeg_exists():
+    if not ffmpeg_exists():
         raise RuntimeError("ffmpeg not found on PATH — required to preprocess audio.")
     tmp = audio_path + ".tmp.wav"
     cmd = f'ffmpeg -y -hide_banner -loglevel error -i {shlex.quote(audio_path)} -ac 1 -ar {target_sr} {shlex.quote(tmp)}'
