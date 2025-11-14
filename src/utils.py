@@ -7,8 +7,17 @@ Helper utilities for file handling, plotting, and logging.
 import os
 import logging
 import numpy as np
+import subprocess
 from scipy.io import wavfile
 from typing import Tuple
+
+def ffmpeg_exists() -> bool:
+    try:
+        subprocess.run(["ffmpeg", "-version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except FileNotFoundError:
+        return False
+
 
 
 def ensure_dir(path: str):
