@@ -19,7 +19,7 @@ def main():
     """
     Execute the full synchronization pipeline.
     """
-    video_dir = "data/raw/"
+    video_dir = "data/augmented/"
     audio_dir = "data/audio/"
     output_dir = "data/synced/"
 
@@ -27,13 +27,15 @@ def main():
     extract_audio_from_videos(video_dir, audio_dir)
 
     # Step 2: Estimate offsets between audio tracks
+    # raw = estimate_offsets_gccphat(audio_dir)
+    # offsets = {k: v['offset_s'] for k, v in raw.items()}
     offsets = estimate_offsets_gccphat(audio_dir)
 
     # Step 3: Apply offsets to synchronize videos
     apply_video_offsets(video_dir, offsets, output_dir)
 
     # Step 4: Evaluate synchronization quality
-    evaluate_synchronization(audio_dir, offsets, output_dir)
+    #evaluate_synchronization(audio_dir, offsets, output_dir)
 
 
 if __name__ == "__main__":
