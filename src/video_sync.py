@@ -5,6 +5,8 @@ Applies time offsets to video streams to produce synchronized outputs.
 """
 import os
 from typing import Dict
+
+from tqdm import tqdm
 from .utils import ensure_dir, setup_logger
 
 logger = setup_logger(__name__)
@@ -28,7 +30,7 @@ def apply_video_offsets(video_dir: str, offsets: Dict[str, float], output_dir: s
             f"error: {e}"
         )
     video_exts = {".mp4"}
-    for fname in sorted(os.listdir(video_dir)):
+    for fname in tqdm(sorted(os.listdir(video_dir))):
         ext = os.path.splitext(fname)[1].lower()
         if ext not in video_exts:
             continue
@@ -43,7 +45,7 @@ def apply_video_offsets(video_dir: str, offsets: Dict[str, float], output_dir: s
         else: # if a video has no offset, treat as reference (0)
             off = 0.0
 
-        logger.info("Syncing %s with offset %.3fs", fname, off)
+        tqdm.write(f"Syncing {fname} with offset {off:.3f}s")
         clip = VideoFileClip(in_path)
 
         if off >= 0:
