@@ -9,7 +9,7 @@ import logging
 import numpy as np
 import subprocess
 from scipy.io import wavfile
-from typing import Tuple
+from typing import Dict, List, Tuple
 
 def ffmpeg_exists() -> bool:
     try:
@@ -18,6 +18,39 @@ def ffmpeg_exists() -> bool:
     except FileNotFoundError:
         return False
 
+def detect_outliers(pairwise: Dict[Tuple[str, str], Tuple[float, float]], 
+                   optimized: Dict[str, float], 
+                   threshold: float = 0.5) -> List[Tuple[str, str, float, float, float]]:
+    """
+    Find pairwise estimates that disagree strongly with optimized solution.
+    
+    Args:
+        pairwise: Dict of (fileA, fileB) -> (offset, confidence)
+        optimized: Dict of filename -> optimized offset
+        threshold: Flag pairs with error > this many seconds (default 0.5s)
+    
+    Returns:
+        List of (fileA, fileB, measured_offset, expected_offset, error) tuples
+    """
+    outliers = []
+    print(f"\nChecking for outliers (threshold={threshold}s)...")
+    
+    for (file_a, file_b), (d_measured, conf) in pairwise.items():
+        d_expected = optimized[file_b] - optimized[file_a]
+        error = abs(d_measured - d_expected)
+        
+        if error > threshold:
+            outliers.append((file_a, file_b, d_measured, d_expected, error))
+            print(f"  ⚠️  {file_a} <-> {file_b}:")
+            print(f"      measured={d_measured:.3f}s, expected={d_expected:.3f}s, "
+                  f"error={error:.3f}s, conf={conf:.3f}")
+    
+    if not outliers:
+        print("  ✓ No outliers detected")
+    else:
+        print(f"\n  Found {len(outliers)} outlier pair(s)")
+    
+    return outliers
 
 
 def ensure_dir(path: str):
