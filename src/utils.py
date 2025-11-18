@@ -78,4 +78,4 @@ def apply_offset(signal: np.ndarray, offset_sec: float, sample_rate: int) -> np.
         return np.pad(signal, (offset_samples, 0), mode='constant')[:len(signal)]
     else:
         # Shift left (pad at end)
-        return np.pad(signal, (0, -offset_samples), mode='constant')[-offset_samples:]
+        return np.pad(signal, (0, -offset_samples), mode='constant')[:len(signal)]

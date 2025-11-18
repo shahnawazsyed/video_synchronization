@@ -35,6 +35,7 @@ def main():
     apply_video_offsets(video_dir, offsets, output_dir)
 
     # Step 4: Evaluate synchronization quality
+    output_dir = "outputs/figures/"
     evaluate_synchronization(audio_dir, offsets, output_dir)
 
 
