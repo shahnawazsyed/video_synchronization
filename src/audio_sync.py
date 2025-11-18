@@ -16,9 +16,16 @@ from scipy.fft import fft, ifft
 from .utils import next_pow2, load_audio
 
 
-def compute_gcc_phat(sig_a: np.ndarray, sig_b: np.ndarray, fs: int) -> Tuple[float, float]:
+def compute_gcc_phat(sig_a: np.ndarray, sig_b: np.ndarray, fs: int, max_offset_sec: float = 10.0) -> Tuple[float, float]:
     """
     Compute time offset between two signals using GCC-PHAT.
+    
+    Args:
+        sig_a: Reference signal
+        sig_b: Signal to align
+        fs: Sample rate
+        max_offset_sec: Maximum expected offset in seconds (default 10s)
+    
     Returns:
         (offset_seconds, confidence_score)
     offset_seconds is the amount to add to sig_b timestamps to align to sig_a.
@@ -39,7 +46,17 @@ def compute_gcc_phat(sig_a: np.ndarray, sig_b: np.ndarray, fs: int) -> Tuple[flo
     cc = np.real(ifft(R_phat))
     cc = np.concatenate((cc[-(n//2):], cc[:n//2]))
 
-    lag_idx = np.argmax(np.abs(cc))
+    # FIXED: Constrain search to realistic lag range
+    max_lag_samples = int(max_offset_sec * fs)
+    center = n // 2
+    search_start = max(0, center - max_lag_samples)
+    search_end = min(len(cc), center + max_lag_samples)
+    
+    # Search only within constrained window
+    search_region = cc[search_start:search_end]
+    lag_idx_local = np.argmax(np.abs(search_region))
+    lag_idx = search_start + lag_idx_local
+    
     lags = np.arange(-n//2, n//2)
     lag = lags[lag_idx]
     offset_seconds = lag / float(fs)
@@ -62,9 +79,14 @@ def compute_gcc_phat(sig_a: np.ndarray, sig_b: np.ndarray, fs: int) -> Tuple[flo
 
     return offset_seconds, confidence
 
-def estimate_offsets_gccphat(audio_dir: str) -> Dict[str, float]:
+def estimate_offsets_gccphat(audio_dir: str, max_offset_sec: float = 10.0) -> Dict[str, float]:
     """
     Compute offsets (seconds) for all WAV files in audio_dir relative to the first file.
+    
+    Args:
+        audio_dir: Directory containing WAV files
+        max_offset_sec: Maximum expected offset between files (default 10s)
+    
     Returns mapping { filename.wav : offset_seconds } where offset_seconds is how much
     to add to that file's timestamps to align with the reference.
     """
@@ -88,6 +110,7 @@ def estimate_offsets_gccphat(audio_dir: str) -> Dict[str, float]:
             sig = np.interp(np.linspace(0, len(sig), new_len, endpoint=False),
                             np.arange(len(sig)), sig).astype(np.float32)
             sr = ref_sr
-        off_s, conf = compute_gcc_phat(ref_sig, sig, ref_sr)
+        off_s, conf = compute_gcc_phat(ref_sig, sig, ref_sr, max_offset_sec=max_offset_sec)
+        print(f"{w}: offset={off_s:.3f}s, confidence={conf:.3f}")
         offsets[w] = float(off_s)
     return offsets
