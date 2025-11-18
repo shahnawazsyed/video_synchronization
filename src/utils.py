@@ -55,3 +55,27 @@ def load_audio(path: str) -> Tuple[np.ndarray, int]:
     if data.ndim > 1:
         data = data.mean(axis=1)
     return data, sr
+
+
+def apply_offset(signal: np.ndarray, offset_sec: float, sample_rate: int) -> np.ndarray:
+    """
+    Apply time offset to a signal by shifting samples.
+    
+    Args:
+        signal: Input audio signal
+        offset_sec: Offset in seconds (positive = shift right, negative = shift left)
+        sample_rate: Sample rate in Hz
+        
+    Returns:
+        Shifted signal (same length as input, padded with zeros)
+    """
+    offset_samples = int(round(offset_sec * sample_rate))
+    
+    if offset_samples == 0:
+        return signal.copy()
+    elif offset_samples > 0:
+        # Shift right (pad at beginning)
+        return np.pad(signal, (offset_samples, 0), mode='constant')[:len(signal)]
+    else:
+        # Shift left (pad at end)
+        return np.pad(signal, (0, -offset_samples), mode='constant')[-offset_samples:]

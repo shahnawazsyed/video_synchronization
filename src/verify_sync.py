@@ -15,7 +15,7 @@ from typing import Dict, Tuple
 from scipy.signal import correlate
 import json
 
-from .utils import load_audio
+from .utils import load_audio, apply_offset
 from .audio_sync import compute_gcc_phat
 
 
@@ -89,7 +89,7 @@ def evaluate_synchronization(audio_dir: str, offsets: Dict[str, float], output_d
         residual_error = abs(offset_s - applied_offset)
         
         # Compute SNR-like metric
-        aligned_segment = _apply_offset(segment, applied_offset, ref_sr)
+        aligned_segment = apply_offset(segment, applied_offset, ref_sr)
         min_len = min(len(ref_segment), len(aligned_segment))
         correlation = np.corrcoef(ref_segment[:min_len], aligned_segment[:min_len])[0, 1]
         
@@ -154,7 +154,7 @@ def plot_waveform_alignment(ref_audio: str, target_audio: str, offset: float,
         tgt_sr = ref_sr
     
     # Apply offset to target
-    aligned_tgt = _apply_offset(tgt_sig, offset, ref_sr)
+    aligned_tgt = apply_offset(tgt_sig, offset, ref_sr)
     
     # Extract segments for plotting
     plot_samples = int(duration * ref_sr)
@@ -207,27 +207,3 @@ def plot_waveform_alignment(ref_audio: str, target_audio: str, offset: float,
         plt.close()
     else:
         plt.show()
-
-
-def _apply_offset(signal: np.ndarray, offset_sec: float, sample_rate: int) -> np.ndarray:
-    """
-    Apply time offset to a signal by shifting samples.
-    
-    Args:
-        signal: Input audio signal
-        offset_sec: Offset in seconds (positive = shift right, negative = shift left)
-        sample_rate: Sample rate in Hz
-        
-    Returns:
-        Shifted signal (same length as input, padded with zeros)
-    """
-    offset_samples = int(round(offset_sec * sample_rate))
-    
-    if offset_samples == 0:
-        return signal.copy()
-    elif offset_samples > 0:
-        # Shift right (pad at beginning)
-        return np.pad(signal, (offset_samples, 0), mode='constant')[:len(signal)]
-    else:
-        # Shift left (pad at end)
-        return np.pad(signal, (0, -offset_samples), mode='constant')[-offset_samples:]
