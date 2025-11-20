@@ -15,7 +15,7 @@ import os
 import warnings
 import numpy as np
 from typing import Dict, Tuple, List, Optional
-from scipy.signal import fftconvolve
+from scipy.signal import butter, sosfilt
 from scipy.fft import fft, ifft
 from scipy.optimize import least_squares
 
@@ -38,6 +38,15 @@ def compute_gcc_phat(sig_a: np.ndarray, sig_b: np.ndarray, fs: int,
         (offset_seconds, confidence_score)
     offset_seconds is the amount to add to sig_b timestamps to align to sig_a.
     """
+
+    # --- PATCH START: Bandpass Filter ---
+    # Filter between 300Hz and 5000Hz to remove rumble and high-freq noise
+    # This dramatically improves GCC-PHAT robustness.
+    sos = butter(4, [300, 5000], btype='bandpass', fs=fs, output='sos')
+    sig_a = sosfilt(sos, sig_a)
+    sig_b = sosfilt(sos, sig_b)
+    # --- PATCH END ---
+
     # Windowing for speed
     if window_sec is not None:
         window_samples = int(window_sec * fs)
@@ -106,7 +115,7 @@ def compute_gcc_phat(sig_a: np.ndarray, sig_b: np.ndarray, fs: int,
     if abs(offset_seconds) > max_offset_sec * 0.9:
         warnings.warn(f"Offset ({offset_seconds:.2f}s) near search boundary - may be truncated")
 
-    return offset_seconds, confidence
+    return -offset_seconds, confidence
 
 def compute_pairwise_offsets(audio_dir: str, 
                             max_offset_sec: float = 10.0,
@@ -225,8 +234,14 @@ def optimize_offsets(pairwise: Dict[Tuple[str, str], Tuple[float, float]],
     # Initial guess: all zeros
     x0 = np.zeros(n)
     
-    # Optimize
-    result = least_squares(residuals, x0, verbose=0)
+    # --- PATCH START: Use Soft-L1 Loss ---
+    # Change verbose=0 to result = ...
+    # 'soft_l1' makes the solver robust to massive outliers.
+    # f_scale=0.1 means errors > 0.1s are treated as linear (outliers) 
+    # rather than squared (which drags the solution).
+    result = least_squares(residuals, x0, loss='soft_l1', f_scale=0.1, verbose=0) 
+    # --- PATCH END ---
+    
     
     # Anchor first file to 0 (arbitrary reference frame)
     offsets_opt = result.x - result.x[0]
