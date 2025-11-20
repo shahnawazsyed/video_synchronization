@@ -26,26 +26,61 @@ from .audio_sync import compute_gcc_phat
 def load_ground_truth(gt_path: str) -> Dict[str, float]:
     """
     Load ground truth offsets from JSON file.
-    
+
+    Supports multiple formats, including:
+    - List of dicts:
+        [
+            {"video": "F1C3LR.mp4", "augmented_file": "F1C3LR_aug.mp4", "time_offset_sec": 1.28},
+            {"video": "F1C12LR.mp4", "augmented_file": "F1C12LR_aug.mp4", "time_offset_sec": -0.46},
+            ...
+        ]
+    - Dict of {filename: offset}
+    - Dict with nested "offsets" key
+
     Args:
         gt_path: Path to ground_truth.json file
-    
+
     Returns:
-        Dict mapping filename -> true offset in seconds
+        Dict mapping filename (augmented_file with .mp4 replaced by .wav) -> true offset in seconds
     """
+    import json, os
+
     with open(gt_path, 'r') as f:
         gt_data = json.load(f)
-    
-    # Handle different possible JSON structures
+
+    # Case 1: list of dicts with augmented_file + time_offset_sec
+    if isinstance(gt_data, list):
+        offsets = {}
+        for entry in gt_data:
+            if not isinstance(entry, dict):
+                continue
+            # Prefer augmented_file if present
+            fname = (
+                entry.get("augmented_file")
+                or entry.get("output_file")
+                or entry.get("video")
+            )
+            offset = entry.get("time_offset_sec")
+            if fname is None or offset is None:
+                continue
+
+            # Convert .mp4 to .wav for matching against predicted audio filenames
+            if fname.endswith(".mp4"):
+                fname = fname.replace(".mp4", ".wav")
+            offsets[os.path.basename(fname)] = float(offset)
+
+        if offsets:
+            return offsets
+
+    # Case 2: dict with direct filename → offset mapping
     if isinstance(gt_data, dict):
-        # Check if it's already in the right format
         if all(isinstance(v, (int, float)) for v in gt_data.values()):
-            return {k: float(v) for k, v in gt_data.items()}
-        # Maybe nested structure like {"offsets": {...}}
-        elif "offsets" in gt_data:
-            return {k: float(v) for k, v in gt_data["offsets"].items()}
-    
+            return {os.path.basename(k): float(v) for k, v in gt_data.items()}
+        elif "offsets" in gt_data and isinstance(gt_data["offsets"], dict):
+            return {os.path.basename(k): float(v) for k, v in gt_data["offsets"].items()}
+
     raise ValueError(f"Unexpected ground truth format in {gt_path}")
+
 
 
 def evaluate_with_ground_truth(predicted_offsets: Dict[str, float],
