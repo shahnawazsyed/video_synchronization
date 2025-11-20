@@ -5,3 +5,5 @@
 .DS_Store
 *.mp4
 /outputs
+/src/setup_scripts
+test_fix.py
