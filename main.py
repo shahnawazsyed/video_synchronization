@@ -15,6 +15,13 @@ from src.audio_sync import estimate_offsets_gccphat, estimate_offsets_robust
 from src.video_sync import apply_video_offsets
 from src.verify_sync import evaluate_synchronization, evaluate_with_ground_truth
 
+#TODO: UI outputting videos
+#TODO: different datasets
+#TODO: output runtime as metric
+#TODO: add ayca to github
+#TODO: meeting notes
+
+
 def main():
     """
     Execute the full synchronization pipeline.
@@ -29,16 +36,17 @@ def main():
     # Step 2: Estimate offsets between audio tracks
     # raw = estimate_offsets_gccphat(audio_dir)
     # offsets = {k: v['offset_s'] for k, v in raw.items()}
+    # Optimal parameters from grid search (100% accuracy < 50ms)
     offsets = estimate_offsets_robust(
         audio_dir,
-        max_offset_sec=3.0,
-        window_sec=60.0,          # Increased: 30s might miss the "clap" in long files
+        max_offset_sec=5.0,       # Increased to capture all offsets in dataset
+        window_sec=90.0,          # Larger window provides more overlap for correlation
         min_confidence=0.15,      
-        outlier_threshold=0.5     # Tighten this to 200ms
+        outlier_threshold=0.5
     )
 
     # Step 3: Apply offsets to synchronize videos
-    #apply_video_offsets(video_dir, offsets, output_dir)
+    apply_video_offsets(video_dir, offsets, output_dir)
 
     # Step 4: Evaluate synchronization quality
     output_dir = "outputs/figures/"
