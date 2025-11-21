@@ -225,23 +225,12 @@ def optimize_offsets(pairwise: Dict[Tuple[str, str], Tuple[float, float]],
             # Weight by square root of confidence (since we're minimizing squared errors)
             res.append(np.sqrt(conf) * error)
         return np.array(res)
-    
-    # Initial guess: all zeros
+
     x0 = np.zeros(n)
-    
-    # --- PATCH START: Use Soft-L1 Loss ---
-    # Change verbose=0 to result = ...
-    # 'soft_l1' makes the solver robust to massive outliers.
-    # f_scale=0.1 means errors > 0.1s are treated as linear (outliers) 
-    # rather than squared (which drags the solution).
     result = least_squares(residuals, x0, loss='soft_l1', f_scale=0.1, verbose=0) 
-    # --- PATCH END ---
-    
-    
     # Anchor first file to 0 (arbitrary reference frame)
     offsets_opt = result.x - result.x[0]
-    
-    # Report optimization quality
+
     final_residuals = residuals(result.x)
     rmse = np.sqrt(np.mean(final_residuals**2))
     print(f"\nOptimization complete:")
@@ -302,41 +291,3 @@ def estimate_offsets_robust(audio_dir: str,
     print("="*60)
     
     return optimized
-
-def estimate_offsets_gccphat(audio_dir: str, max_offset_sec: float = 10.0) -> Dict[str, float]:
-    """
-    [LEGACY] Compute offsets (seconds) for all WAV files relative to first file.
-    
-    NOTE: For robust synchronization with degraded files, use estimate_offsets_robust() instead.
-    
-    Args:
-        audio_dir: Directory containing WAV files
-        max_offset_sec: Maximum expected offset between files (default 10s)
-    
-    Returns mapping { filename.wav : offset_seconds } where offset_seconds is how much
-    to add to that file's timestamps to align with the reference.
-    """
-    wavs = sorted([f for f in os.listdir(audio_dir) if f.lower().endswith(".wav")])
-    if not wavs:
-        raise FileNotFoundError(f"No WAV files found in {audio_dir}")
-
-    ref_fname = wavs[0]
-    ref_path = os.path.join(audio_dir, ref_fname)
-    ref_sig, ref_sr = load_audio(ref_path)
-
-    offsets: Dict[str, float] = {}
-    offsets[ref_fname] = 0.0
-
-    for w in wavs[1:]:
-        path = os.path.join(audio_dir, w)
-        sig, sr = load_audio(path)
-        if sr != ref_sr:
-            duration = len(sig) / sr
-            new_len = int(round(duration * ref_sr))
-            sig = np.interp(np.linspace(0, len(sig), new_len, endpoint=False),
-                            np.arange(len(sig)), sig).astype(np.float32)
-            sr = ref_sr
-        off_s, conf = compute_gcc_phat(ref_sig, sig, ref_sr, max_offset_sec=max_offset_sec)
-        print(f"{w}: offset={off_s:.3f}s, confidence={conf:.3f}")
-        offsets[w] = float(off_s)
-    return offsets
