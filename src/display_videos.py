@@ -50,7 +50,6 @@ def load_video_captures(video_dir):
     
     return files, caps
 
-
 def get_video_properties(cap):
     """Get FPS, resolution, and frame count from a video capture."""
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -58,7 +57,6 @@ def get_video_properties(cap):
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     return fps, width, height, frames
-
 
 def label_frame(frame, label, font_scale=0.7, thickness=2):
     """
@@ -84,7 +82,6 @@ def label_frame(frame, label, font_scale=0.7, thickness=2):
     
     return frame
 
-
 def arrange_in_grid(frames, grid_shape):
     """
     Arrange list of frames into a grid layout.
@@ -108,7 +105,6 @@ def arrange_in_grid(frames, grid_shape):
     
     # Stack rows vertically
     return np.vstack(row_blocks)
-
 
 def read_frames_at_position(caps, labels, frame_idx, resize_width=400):
     """
@@ -148,7 +144,6 @@ def read_frames_at_position(caps, labels, frame_idx, resize_width=400):
         frames.append(frame)
     
     return frames
-
 
 def show_video_grid(video_dir, title="Video Grid", resize_width=250, grid_size=2, frame_skip=2, selected_files=None):
     """
@@ -270,7 +265,6 @@ def show_video_grid(video_dir, title="Video Grid", resize_width=250, grid_size=2
         cap.release()
     
     print(f"Closed {title}\n")
-
 
 if __name__ == "__main__":
     # Test with augmented videos
