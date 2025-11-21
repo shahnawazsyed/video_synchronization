@@ -2,6 +2,7 @@
 /src/__pycache__
 .DS_Store
 *.mp4
-test_fix.py
 /data
 /outputs
+/src/setup_scripts
+*.jpg
