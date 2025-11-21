@@ -119,6 +119,24 @@ def evaluate_with_ground_truth(predicted_offsets: Dict[str, float],
         print("Warning: No common files between predicted and ground truth")
         return None
     
+    # Adjust predicted offsets to align with ground truth reference frame
+    # The sync algorithm anchors the first file (alphabetically) to 0.0, but that file
+    # has its own ground truth offset. We need to shift all predictions by this amount.
+    sorted_files = sorted(predicted_offsets.keys())
+    if sorted_files:
+        reference_file = sorted_files[0]  # First file alphabetically
+        if reference_file in gt_offsets:
+            reference_gt_offset = gt_offsets[reference_file]
+            print(f"Adjusting predictions: Reference file '{reference_file}' has GT offset {reference_gt_offset:+.3f}s")
+            print(f"Shifting all predictions by {reference_gt_offset:+.3f}s to align with GT reference frame\n")
+            
+            # Adjust all predictions
+            adjusted_offsets = {
+                fname: offset + reference_gt_offset 
+                for fname, offset in predicted_offsets.items()
+            }
+            predicted_offsets = adjusted_offsets
+    
     # Compute metrics
     errors = []
     results = {
