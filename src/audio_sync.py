@@ -38,14 +38,9 @@ def compute_gcc_phat(sig_a: np.ndarray, sig_b: np.ndarray, fs: int,
         (offset_seconds, confidence_score)
     offset_seconds is the amount to add to sig_b timestamps to align to sig_a.
     """
-
-    # --- PATCH START: Bandpass Filter ---
-    # Filter between 300Hz and 5000Hz to remove rumble and high-freq noise
-    # This dramatically improves GCC-PHAT robustness.
     sos = butter(4, [300, 5000], btype='bandpass', fs=fs, output='sos')
     sig_a = sosfilt(sos, sig_a)
     sig_b = sosfilt(sos, sig_b)
-    # --- PATCH END ---
 
     # Windowing for speed
     if window_sec is not None:
