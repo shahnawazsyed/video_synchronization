@@ -11,9 +11,9 @@ This script:
 """
 
 from src.preprocess import extract_audio_from_videos
-from src.audio_sync import estimate_offsets_gccphat, estimate_offsets_robust
+from src.audio_sync import estimate_offsets_robust
 from src.video_sync import apply_video_offsets
-from src.verify_sync import evaluate_synchronization, evaluate_with_ground_truth
+from src.verify_sync import evaluate_with_ground_truth
 from src.display_videos import show_video_grid
 
 #TODO: different datasets
@@ -47,7 +47,9 @@ def main():
         outlier_threshold=0.5
     )
     sync_runtime = time.time() - start_time
-    apply_video_offsets(video_dir, offsets, output_dir)
+    # Convert audio offset keys (wav) to corresponding video filenames (mp4)
+    video_offsets = {fname.replace('.wav', '.mp4'): off for fname, off in offsets.items()}
+    apply_video_offsets(video_dir, video_offsets, output_dir)
     figures_dir = "outputs/figures/"
     ground_truth_path = "data/augmented/ground_truth.json"   # adjust if your JSON is elsewhere
     evaluate_with_ground_truth(offsets, ground_truth_path, figures_dir, runtime_sec=sync_runtime)
