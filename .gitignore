@@ -6,3 +6,5 @@
 /outputs
 /src/setup_scripts
 *.jpg
+grid_search_results.json
+grid_search_params.py
