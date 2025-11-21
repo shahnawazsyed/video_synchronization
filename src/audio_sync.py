@@ -41,44 +41,35 @@ def compute_gcc_phat(sig_a: np.ndarray, sig_b: np.ndarray, fs: int,
     sos = butter(4, [300, 5000], btype='bandpass', fs=fs, output='sos')
     sig_a = sosfilt(sos, sig_a)
     sig_b = sosfilt(sos, sig_b)
-
     # Windowing for speed
     if window_sec is not None:
         window_samples = int(window_sec * fs)
         sig_a = sig_a[:window_samples]
         sig_b = sig_b[:window_samples]
-    
     a = sig_a - np.mean(sig_a)
     b = sig_b - np.mean(sig_b)
-
     max_len = max(len(a), len(b))
     n = next_pow2(2 * max_len)
-
     A = fft(a, n=n)
     B = fft(b, n=n)
     R = A * np.conj(B)
     denom = np.abs(R)
     denom[denom < 1e-8] = 1e-8
     R_phat = R / denom
-
     cc = np.real(ifft(R_phat))
     cc = np.concatenate((cc[-(n//2):], cc[:n//2]))
-
     # Constrain search to realistic lag range
     max_lag_samples = int(max_offset_sec * fs)
     center = n // 2
     search_start = max(0, center - max_lag_samples)
     search_end = min(len(cc), center + max_lag_samples)
-    
     # Search only within constrained window
     search_region = cc[search_start:search_end]
     lag_idx_local = np.argmax(np.abs(search_region))
     lag_idx = search_start + lag_idx_local
-    
     lags = np.arange(-n//2, n//2)
     lag = lags[lag_idx]
     offset_seconds = lag / float(fs)
-
     # Sub-sample precision via parabolic interpolation
     if 0 < lag_idx < len(cc) - 1:
         y1, y2, y3 = cc[lag_idx-1], cc[lag_idx], cc[lag_idx+1]
@@ -86,7 +77,6 @@ def compute_gcc_phat(sig_a: np.ndarray, sig_b: np.ndarray, fs: int,
         if abs(denom_interp) > 1e-8:
             delta = 0.5 * (y3 - y1) / denom_interp
             offset_seconds += delta / float(fs)
-
     # Confidence scoring
     peak = np.abs(cc[lag_idx])
     window = int(0.01 * fs)
@@ -103,13 +93,11 @@ def compute_gcc_phat(sig_a: np.ndarray, sig_b: np.ndarray, fs: int,
     else:
         confidence = float(peak / (noise_floor + 1e-8))
     confidence = confidence / (confidence + 1.0)
-    
     # Quality warnings
     if confidence < 0.3:
         warnings.warn(f"Low confidence ({confidence:.2f}) - sync may be unreliable")
     if abs(offset_seconds) > max_offset_sec * 0.9:
         warnings.warn(f"Offset ({offset_seconds:.2f}s) near search boundary - may be truncated")
-
     return -offset_seconds, confidence
 
 def compute_pairwise_offsets(audio_dir: str, 
@@ -118,7 +106,6 @@ def compute_pairwise_offsets(audio_dir: str,
                             min_confidence: float = 0.0) -> Dict[Tuple[str, str], Tuple[float, float]]:
     """
     Compute offsets between all pairs of WAV files in directory.
-    
     Args:
         audio_dir: Directory containing WAV files
         max_offset_sec: Maximum expected offset between files (default 10s)
@@ -132,12 +119,10 @@ def compute_pairwise_offsets(audio_dir: str,
     wavs = sorted([f for f in os.listdir(audio_dir) if f.lower().endswith(".wav")])
     if not wavs:
         raise FileNotFoundError(f"No WAV files found in {audio_dir}")
-    
     if len(wavs) < 2:
         raise ValueError(f"Need at least 2 files for pairwise sync, found {len(wavs)}")
     
     print(f"Loading {len(wavs)} audio files...")
-    
     # Load all files once
     signals = {}
     sample_rates = {}
@@ -146,10 +131,8 @@ def compute_pairwise_offsets(audio_dir: str,
         sig, sr = load_audio(path)
         signals[w] = sig
         sample_rates[w] = sr
-    
     # Use most common sample rate as reference
     ref_sr = max(set(sample_rates.values()), key=list(sample_rates.values()).count)
-    
     # Resample all to reference rate
     for w in wavs:
         if sample_rates[w] != ref_sr:
@@ -163,33 +146,26 @@ def compute_pairwise_offsets(audio_dir: str,
                 sig
             ).astype(np.float32)
             sample_rates[w] = ref_sr
-    
     print(f"Computing {len(wavs) * (len(wavs) - 1) // 2} pairwise offsets...")
-    
     pairwise = {}
     skipped = 0
-    
     for i, file_a in enumerate(wavs):
         for j, file_b in enumerate(wavs[i+1:], start=i+1):
             sig_a = signals[file_a]
             sig_b = signals[file_b]
-            
             offset, conf = compute_gcc_phat(
                 sig_a, sig_b, ref_sr, 
                 max_offset_sec=max_offset_sec,
                 window_sec=window_sec
             )
-            
             if conf >= min_confidence:
                 pairwise[(file_a, file_b)] = (offset, conf)
                 print(f"  {file_a} <-> {file_b}: offset={offset:.3f}s, confidence={conf:.3f}")
             else:
                 skipped += 1
                 print(f"  {file_a} <-> {file_b}: SKIPPED (confidence={conf:.3f} < {min_confidence})")
-    
     if skipped > 0:
         print(f"\nSkipped {skipped} pairs due to low confidence")
-    
     return pairwise
 
 def optimize_offsets(pairwise: Dict[Tuple[str, str], Tuple[float, float]], 
@@ -211,10 +187,8 @@ def optimize_offsets(pairwise: Dict[Tuple[str, str], Tuple[float, float]],
     """
     if not pairwise:
         raise ValueError("No pairwise offsets provided for optimization")
-    
     n = len(wavs)
     file_to_idx = {w: i for i, w in enumerate(wavs)}
-
     def residuals(offsets):
         res = []
         for (file_a, file_b), (d_ab, conf) in pairwise.items():
@@ -225,18 +199,14 @@ def optimize_offsets(pairwise: Dict[Tuple[str, str], Tuple[float, float]],
             # Weight by square root of confidence (since we're minimizing squared errors)
             res.append(np.sqrt(conf) * error)
         return np.array(res)
-
     x0 = np.zeros(n)
     result = least_squares(residuals, x0, loss='soft_l1', f_scale=0.1, verbose=0) 
-    # Anchor first file to 0 (arbitrary reference frame)
-    offsets_opt = result.x - result.x[0]
-
+    offsets_opt = result.x - result.x[0] # Anchor first file to 0 (arbitrary reference frame)
     final_residuals = residuals(result.x)
     rmse = np.sqrt(np.mean(final_residuals**2))
     print(f"\nOptimization complete:")
     print(f"  RMSE: {rmse:.4f}s")
     print(f"  Max residual: {np.max(np.abs(final_residuals)):.4f}s")
-    
     return {w: float(offsets_opt[i]) for i, w in enumerate(wavs)}
 
 def estimate_offsets_robust(audio_dir: str, 
@@ -263,7 +233,6 @@ def estimate_offsets_robust(audio_dir: str,
         Add these offsets to each file's timestamps to align them.
     """
     wavs = sorted([f for f in os.listdir(audio_dir) if f.lower().endswith(".wav")])
-    
     # Step 1: Compute all pairwise offsets
     pairwise = compute_pairwise_offsets(
         audio_dir, 
@@ -271,17 +240,13 @@ def estimate_offsets_robust(audio_dir: str,
         window_sec=window_sec,
         min_confidence=min_confidence
     )
-    
     if not pairwise:
         raise ValueError("No valid pairwise offsets found - all pairs below confidence threshold")
-    
     # Step 2: Optimize for global consistency
     print("\nOptimizing for global consistency...")
     optimized = optimize_offsets(pairwise, wavs)
-    
     # Step 3: Detect outliers
     outliers = detect_outliers(pairwise, optimized, threshold=outlier_threshold)
-    
     # Step 4: Report results
     print("\n" + "="*60)
     print("FINAL SYNCHRONIZED OFFSETS:")
