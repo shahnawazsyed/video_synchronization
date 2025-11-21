@@ -85,7 +85,8 @@ def load_ground_truth(gt_path: str) -> Dict[str, float]:
 
 def evaluate_with_ground_truth(predicted_offsets: Dict[str, float],
                                ground_truth_path: str,
-                               output_dir: str) -> Dict:
+                               output_dir: str,
+                               runtime_sec: Optional[float] = None) -> Dict:
     """
     Compare predicted offsets against ground truth and generate metrics.
     
@@ -186,6 +187,10 @@ def evaluate_with_ground_truth(predicted_offsets: Dict[str, float],
         "accuracy_500ms": float(np.mean(errors < 0.5) * 100)    # % within 500ms
     }
     
+    # Add runtime if provided
+    if runtime_sec is not None:
+        results["statistics"]["runtime_sec"] = float(runtime_sec)
+    
     print(f"\n{'='*60}")
     print(f"Overall Statistics:")
     print(f"{'='*60}")
@@ -194,6 +199,10 @@ def evaluate_with_ground_truth(predicted_offsets: Dict[str, float],
     print(f"  Std Dev:               {results['statistics']['std_error']:.4f}s")
     print(f"  RMSE:                  {results['statistics']['rmse']:.4f}s")
     print(f"  Max Error:             {results['statistics']['max_error']:.4f}s")
+    
+    if runtime_sec is not None:
+        print(f"\n  Synchronization Runtime: {runtime_sec:.2f}s")
+    
     print(f"\n  Accuracy (< 50ms):     {results['statistics']['accuracy_50ms']:.1f}%")
     print(f"  Accuracy (< 100ms):    {results['statistics']['accuracy_100ms']:.1f}%")
     print(f"  Accuracy (< 500ms):    {results['statistics']['accuracy_500ms']:.1f}%")
