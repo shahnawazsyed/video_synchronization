@@ -17,7 +17,7 @@ MIN_OFFSET = -2.0
 MAX_OFFSET = 2.0
 
 # Target clip length (to ensure enough overlap)
-TARGET_CLIP_LEN = 60.0
+TARGET_CLIP_LEN = 300.0
 
 
 def get_video_duration(path):
