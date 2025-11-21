@@ -16,10 +16,7 @@ from src.video_sync import apply_video_offsets
 from src.verify_sync import evaluate_synchronization, evaluate_with_ground_truth
 from src.display_videos import show_video_grid
 
-
 #TODO: different datasets
-#TODO: add ayca to github
-
 
 def main():
     """

@@ -52,7 +52,6 @@ def detect_outliers(pairwise: Dict[Tuple[str, str], Tuple[float, float]],
     
     return outliers
 
-
 def ensure_dir(path: str):
     """Create directory if it doesn't exist."""
     os.makedirs(path, exist_ok=True)
@@ -69,7 +68,6 @@ def setup_logger(name: str = "sync", level: int = logging.INFO) -> logging.Logge
     ch.setFormatter(fmt)
     logger.addHandler(ch)
     return logger
-
 
 def next_pow2(n: int) -> int:
     p = 1
@@ -88,7 +86,6 @@ def load_audio(path: str) -> Tuple[np.ndarray, int]:
     if data.ndim > 1:
         data = data.mean(axis=1)
     return data, sr
-
 
 def apply_offset(signal: np.ndarray, offset_sec: float, sample_rate: int) -> np.ndarray:
     """
