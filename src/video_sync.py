@@ -1,62 +1,155 @@
 """
 video_sync.py
 --------------
-Applies time offsets to video streams to produce synchronized outputs.
+Applies time offsets to entire media files (audio+video together) using ffmpeg.
+
+Offset semantics (Option C):
+- Positive offset  (>0): delay the whole file (video+audio start later)
+- Negative offset (<0): trim the first |offset| seconds (drop early content)
+
+Uses stream copy when possible (fast, lossless).
+If container/codec conflicts occur, falls back to safe re-encode.
 """
+
 import os
+import subprocess
 from typing import Dict
-
 from tqdm import tqdm
-from .utils import ensure_dir, setup_logger
 
-logger = setup_logger(__name__)
+EPS = 1e-3  # ignore tiny offsets (<1 ms)
+
+
+def _run(cmd):
+    """Run ffmpeg command list, raise on error."""
+    result = subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.decode("utf8"))
+    return result.stdout.decode("utf8")
+
+
+def _delay_stream_copy(input_path, output_path, offset):
+    """
+    Positive offset: delay entire file using -itsoffset.
+    This preserves both audio and video PTS if ffmpeg can stream copy.
+    """
+    return [
+        "ffmpeg", "-y",
+        "-itsoffset", str(offset),
+        "-i", input_path,
+        "-i", input_path,
+        "-map", "0:v", "-map", "0:a",
+        "-c", "copy",
+        output_path
+    ]
+
+
+def _trim_stream_copy(input_path, output_path, trim):
+    """Negative offset: fast trim using -ss before -i."""
+    return [
+        "ffmpeg", "-y",
+        "-ss", str(trim),
+        "-i", input_path,
+        "-c", "copy",
+        output_path
+    ]
+
+
+def _reencode_delay(input_path, output_path, offset):
+    """Fallback method: re-encode and shift using filter_complex."""
+    ms = int(offset * 1000)
+    return [
+        "ffmpeg", "-y",
+        "-i", input_path,
+        "-filter_complex",
+        f"[0:v]setpts=PTS+{offset}/TB[v];"
+        f"[0:a]adelay={ms}:all=1,asetpts=N/SR/TB[a]",
+        "-map", "[v]", "-map", "[a]",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+        "-c:a", "aac", "-b:a", "128k",
+        output_path
+    ]
+
+
+def _reencode_trim(input_path, output_path, trim):
+    """Fallback for negative offset: trim then re-encode."""
+    return [
+        "ffmpeg", "-y",
+        "-ss", str(trim),
+        "-i", input_path,
+        "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+        "-c:a", "aac", "-b:a", "128k",
+        output_path
+    ]
+
 
 def apply_video_offsets(video_dir: str, offsets: Dict[str, float], output_dir: str, verbose: bool = True):
     """
-    Synchronize multiple video feeds using precomputed time offsets.
-    Args:
-        video_dir: Path to raw, unsynchronized videos.
-        offsets: Dictionary of {filename.wav or filename.mp4: offset_seconds}.
-                 Offsets are seconds to ADD to that file to align it with the reference.
-                 Typical usage: offsets keys are the same base-names as extracted audio.
-        output_dir: Directory to store synchronized video outputs.
+    Apply time offsets to entire video files.
+
+    Parameters
+    ----------
+    video_dir : str
+        Directory containing original videos.
+    offsets : Dict[str, float]
+        Mapping filename → offset_in_seconds. Positive = delay, Negative = trim.
+    output_dir : str
+        Directory where synced videos will be saved.
+    verbose : bool
+        Show tqdm progress.
+
+    Returns
+    -------
+    True on completion.
     """
-    ensure_dir(output_dir)
 
-    try:
-        from moviepy.editor import VideoFileClip, CompositeVideoClip
-    except Exception as e:
-        raise RuntimeError(
-            f"error: {e}"
-        )
-    video_exts = {".mp4"}
-    for fname in tqdm(sorted(os.listdir(video_dir))):
-        ext = os.path.splitext(fname)[1].lower()
-        if ext not in video_exts:
-            continue
+    os.makedirs(output_dir, exist_ok=True)
+
+    pbar = tqdm(offsets.items(), disable=not verbose, desc="sync_videos", unit="file")
+
+    for fname, off in pbar:
         in_path = os.path.join(video_dir, fname)
-        base = os.path.splitext(fname)[0]
-        # offsets probably keyed by audio filename like "<base>.wav" — try both
-        off = None
-        if fname in offsets:
-            off = offsets[fname]
-        elif base + ".wav" in offsets:
-            off = offsets[base + ".wav"]
-        else: # if a video has no offset, treat as reference (0)
-            off = 0.0
-
-        tqdm.write(f"Syncing {fname} with offset {off:.3f}s")
-        clip = VideoFileClip(in_path)
-
-        if off >= 0:
-            shifted = clip.set_start(off)
-            comp = CompositeVideoClip([shifted], size=clip.size).set_duration(shifted.end)
-        else: #negative offset
-            trim_start = min(max(0.0, -off), clip.duration)
-            trimmed = clip.subclip(trim_start, clip.duration)
-            comp = trimmed.set_start(0).set_duration(trimmed.duration)
-
         out_path = os.path.join(output_dir, fname)
-        comp.write_videofile(out_path, codec="libx264", audio_codec="aac", verbose=verbose, logger=None)
-        clip.close()
-        comp.close()
+
+        pbar.set_postfix({"file": fname, "offset": f"{off:.3f}s"})
+
+        if not os.path.exists(in_path):
+            pbar.write(f"WARNING: missing input {in_path}")
+            continue
+
+        # tiny offset → just copy
+        if abs(off) < EPS:
+            try:
+                _run(["ffmpeg", "-y", "-i", in_path, "-c", "copy", out_path])
+                continue
+            except Exception:
+                pass  # try full path below
+
+        # positive offset = delay
+        if off > 0:
+            try:
+                _run(_delay_stream_copy(in_path, out_path, off))
+                continue
+            except Exception as e:
+                pbar.write(f"Stream-copy delay failed for {fname}: {e}")
+                try:
+                    _run(_reencode_delay(in_path, out_path, off))
+                except Exception as e2:
+                    pbar.write(f"Reencode delay also failed for {fname}: {e2}")
+
+        # negative offset = trim
+        else:
+            trim = abs(off)
+            try:
+                _run(_trim_stream_copy(in_path, out_path, trim))
+                continue
+            except Exception as e:
+                pbar.write(f"Stream-copy trim failed for {fname}: {e}")
+                try:
+                    _run(_reencode_trim(in_path, out_path, trim))
+                except Exception as e2:
+                    pbar.write(f"Reencode trim also failed for {fname}: {e2}")
+    return True
