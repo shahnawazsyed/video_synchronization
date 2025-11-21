@@ -1,9 +1,7 @@
 /venv
-/src/setup scripts
-/data
 /src/__pycache__
 .DS_Store
 *.mp4
-/outputs
-/src/setup_scripts
 test_fix.py
+/data
+/outputs
