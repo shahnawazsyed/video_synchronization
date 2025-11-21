@@ -150,7 +150,7 @@ def read_frames_at_position(caps, labels, frame_idx, resize_width=400):
     return frames
 
 
-def show_video_grid(video_dir, title="Video Grid", resize_width=250, grid_size=2, frame_skip=2, video_selection=None):
+def show_video_grid(video_dir, title="Video Grid", resize_width=250, grid_size=2, frame_skip=2, selected_files=None):
     """
     Display multiple videos in a grid with playback controls.
     
@@ -160,8 +160,7 @@ def show_video_grid(video_dir, title="Video Grid", resize_width=250, grid_size=2
         resize_width: Width of each video thumbnail in pixels (default 250 for performance)
         grid_size: Grid dimensions (default 2 for 2x2 grid)
         frame_skip: Skip every N frames for faster playback (default 2)
-        video_selection: List of specific video basenames to display (e.g., ['F1C1LR_aug.mp4', 'F1C23LR_aug.mp4'])
-                        If None, uses first grid_size^2 videos
+        selected_files: List of specific filenames (e.g., ["F1C7LR_aug.mp4", ...]) to display. If None, defaults to first grid_size^2 videos.
         
     Controls:
         - Space: Play/Pause
@@ -177,37 +176,30 @@ def show_video_grid(video_dir, title="Video Grid", resize_width=250, grid_size=2
         print("No videos to display")
         return
     
+    # If specific files are requested, filter to those (preserve order)
+    if selected_files is not None:
+        # Ensure we have the exact filenames (including extensions)
+        selected_set = set(selected_files)
+        filtered = [(f, cap) for f, cap in zip(files, caps) if f in selected_set]
+        if not filtered:
+            print(f"No matching videos found for selection: {selected_files}")
+            return
+        files, caps = zip(*filtered)
+        files = list(files)
+        caps = list(caps)
+        n = len(caps)
+        print(f"Displaying selected videos: {', '.join(files)}")
+    
     # Use fixed grid size for better performance (2x2 = 4 videos)
     grid_shape = (grid_size, grid_size)
-    max_videos = grid_size * grid_size
     
-    # Select specific videos if requested
-    if video_selection:
-        selected_files = []
-        selected_caps = []
-        
-        for video_name in video_selection:
-            try:
-                idx = files.index(video_name)
-                selected_files.append(files[idx])
-                selected_caps.append(caps[idx])
-            except ValueError:
-                print(f"Warning: Video '{video_name}' not found, skipping")
-        
-        if selected_files:
-            print(f"Showing {len(selected_files)} selected videos: {', '.join(selected_files)}")
-            files = selected_files
-            caps = selected_caps
-            n = len(files)
-        else:
-            print("Warning: No valid videos in selection, using default")
-    else:
-        # Limit to first grid_size^2 videos for performance
-        if n > max_videos:
-            print(f"Showing first {max_videos} of {n} videos for performance")
-            files = files[:max_videos]
-            caps = caps[:max_videos]
-            n = max_videos
+    # Limit to first grid_size^2 videos for performance if more were passed
+    max_videos = grid_size * grid_size
+    if n > max_videos:
+        print(f"Showing first {max_videos} of {n} videos for performance")
+        files = files[:max_videos]
+        caps = caps[:max_videos]
+        n = max_videos
     
     # Get video properties
     frame_counts = [int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) for cap in caps]
