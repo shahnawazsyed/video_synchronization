@@ -14,6 +14,11 @@ import os
 import itertools
 import cv2
 import numpy as np
+
+# Force non-interactive backend for matplotlib (required for background threads)
+import matplotlib
+matplotlib.use('Agg')
+
 from scipy.signal import correlate, resample
 from scipy.ndimage import uniform_filter1d
 from scipy.optimize import least_squares

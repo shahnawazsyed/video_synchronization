@@ -115,7 +115,11 @@ def apply_video_offsets(video_dir: str, offsets: Dict[str, float], output_dir: s
 
     for fname, off in pbar:
         in_path = os.path.join(video_dir, fname)
-        out_path = os.path.join(output_dir, fname)
+        
+        # Add _synced suffix to output filename
+        base_name, ext = os.path.splitext(fname)
+        out_fname = f"{base_name}_synced{ext}"
+        out_path = os.path.join(output_dir, out_fname)
 
         pbar.set_postfix({"file": fname, "offset": f"{off:.3f}s"})
 
