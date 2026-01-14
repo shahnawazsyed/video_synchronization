@@ -12,66 +12,57 @@ This script:
 
 import os
 import shutil
+import src.config as config
 from src.video_sync import apply_video_offsets
 from src.display_videos import show_video_grid
 from src.visual_sync import sync_videos_by_motion
-import src.config as config
 
-def main():
-    """
-    Execute the full synchronization pipeline.
-    """
+def run_synchronization():
+    """Execute the full video synchronization pipeline."""
     video_dir = config.VIDEO_DIR
     output_dir = config.OUTPUT_DIR
+    selected_videos = config.SELECTED_VIDEOS
     
-    # Display videos before synchronization
+    # --- STEP 0: PRE-SYNC VISUALIZATION ---
     print("\n" + "="*60)
-    print("STEP 0: BEFORE SYNCHRONIZATION")
+    print("STEP 0: INITIAL VISUALIZATION")
     print("="*60)
-    print("Displaying desynchronized videos...")
-    print("Press 'q' to continue to synchronization pipeline\n")
-    show_video_grid(video_dir, title="Before Sync (Desynchronized)", selected_files=config.SELECTED_VIDEOS)
+    print("Displaying original videos. Press 'q' to proceed to sync.\n")
+    show_video_grid(video_dir, title="Pre-Sync Check", selected_files=selected_videos)
 
-    # Estimate offsets
+    # --- STEP 1: OFFSET ESTIMATION ---
+    print("\n" + "="*60)
+    print(f"STEP 1: {config.SYNC_METHOD.upper()} OFFSET ESTIMATION")
+    print("="*60)
+    
     if config.SYNC_METHOD == "visual":
-        print("\n" + "="*60)
-        print("STEP 1: VISUAL (MOTION) SYNCHRONIZATION")
-        print("="*60)
-        
-        offsets = sync_videos_by_motion(
+        video_offsets = sync_videos_by_motion(
             video_dir, 
-            config.SELECTED_VIDEOS,
+            selected_videos,
             max_offset_sec=20.0,
             output_dir=config.VISUAL_SYNC_OUTPUT_DIR
         )
-        video_offsets = offsets
-        
     else:
-        # Audio-based sync (fallback)
+        # Audio-based sync
         from src.preprocess import extract_audio_from_videos
         from src.audio_sync import estimate_offsets_robust
         
         audio_dir = config.AUDIO_DIR
-        print("\n" + "="*60)
-        print("STEP 1: EXTRACTING AUDIO")
-        print("="*60)
+        print("Extracting audio tracks...")
         extract_audio_from_videos(video_dir, audio_dir)
 
+        # Prepare directory for selected audio files
         selected_audio_dir = os.path.join(audio_dir, "selected")
         os.makedirs(selected_audio_dir, exist_ok=True)
-        for vid in config.SELECTED_VIDEOS:
+        for vid in selected_videos:
             base_name = os.path.splitext(vid)[0]
-            wav = base_name + '.wav'
-            src = os.path.join(audio_dir, wav)
-            dst = os.path.join(selected_audio_dir, wav)
-            if os.path.exists(src):
-                shutil.copy(src, dst)
+            wav_file = f"{base_name}.wav"
+            src_path = os.path.join(audio_dir, wav_file)
+            if os.path.exists(src_path):
+                shutil.copy(src_path, os.path.join(selected_audio_dir, wav_file))
 
-        print("\n" + "="*60)
-        print("STEP 2: ESTIMATING AUDIO OFFSETS")
-        print("="*60)
-        
-        offsets = estimate_offsets_robust(
+        print("Estimating offsets using GCC-PHAT...")
+        raw_offsets = estimate_offsets_robust(
             selected_audio_dir,
             max_offset_sec=15.0,
             window_sec=300.0,
@@ -79,41 +70,38 @@ def main():
             outlier_threshold=0.5
         )
         
-        # Convert audio offset keys (wav) to corresponding video filenames
+        # Map audio results back to video files
         video_offsets = {}
-        for fname, off in offsets.items():
+        for fname, offset in raw_offsets.items():
             base_name = fname.replace('.wav', '')
-            # Find the matching video file (could be .mp4 or .mov)
-            for vid in config.SELECTED_VIDEOS:
+            for vid in selected_videos:
                 if vid.startswith(base_name):
-                    video_offsets[vid] = off
+                    video_offsets[vid] = offset
                     break
 
-    # Apply offsets to videos
+    # --- STEP 2: OFFSET APPLICATION ---
     print("\n" + "="*60)
-    print("STEP 2: APPLYING VIDEO OFFSETS")
+    print("STEP 2: APPLYING SYNCHRONIZATION")
     print("="*60)
-    
     apply_video_offsets(video_dir, video_offsets, output_dir)
     
-    # Display videos after synchronization
+    # --- STEP 3: POST-SYNC VERIFICATION ---
     print("\n" + "="*60)
-    print("STEP 3: AFTER SYNCHRONIZATION")
+    print("STEP 3: SYNCHRONIZATION VERIFICATION")
     print("="*60)
-    print("Displaying synchronized videos for manual inspection...")
-    print("Press 'q' to finish\n")
+    print("Displaying synced results. Press 'q' to exit.\n")
     
-    # Get output filenames
+    # Verify existance of synced files
     output_files = []
-    for vid in config.SELECTED_VIDEOS:
+    for vid in selected_videos:
         base_name = os.path.splitext(vid)[0]
         for ext in ['.mp4', '.mov']:
-            if os.path.exists(os.path.join(output_dir, base_name + ext)):
-                output_files.append(base_name + ext)
+            if os.path.exists(os.path.join(output_dir, f"{base_name}{ext}")):
+                output_files.append(f"{base_name}{ext}")
                 break
     
-    show_video_grid(output_dir, title="After Sync (Synchronized)", 
+    show_video_grid(output_dir, title="Post-Sync Verification", 
                    selected_files=output_files if output_files else None)
 
 if __name__ == "__main__":
-    main()
+    run_synchronization()
