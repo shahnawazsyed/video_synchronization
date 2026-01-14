@@ -106,62 +106,58 @@ def arrange_in_grid(frames, grid_shape):
     # Stack rows vertically
     return np.vstack(row_blocks)
 
-def read_frames_at_position(caps, labels, frame_idx, resize_width=400):
+def read_frames_sequentially(caps, labels, current_frame_indices, target_frame_idx, resize_width=400):
     """
-    Read one frame from each video at a given frame index.
-    
-    Args:
-        caps: List of video captures
-        labels: List of filename labels
-        frame_idx: Frame index to read
-        resize_width: Target width for each thumbnail
-        
-    Returns:
-        List of frames
+    Read frames from captures, seeking only if necessary, with uniform sizing.
     """
     frames = []
+    new_indices = []
+    target_height = None
     
-    for cap, label in zip(caps, labels):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+    for i, (cap, label) in enumerate(zip(caps, labels)):
+        curr_idx = current_frame_indices[i]
+        
+        # Seek if we are not at the target index
+        if curr_idx != target_frame_idx:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame_idx)
+            curr_idx = target_frame_idx
+            
         ret, frame = cap.read()
+        new_indices.append(curr_idx + 1)
         
         if not ret:
             # Create blank frame if video ended
-            if frames:
-                h, w = frames[0].shape[:2]
-            else:
-                h, w = 240, 320
+            h = target_height if target_height else 240
+            w = resize_width
             frame = np.zeros((h, w, 3), dtype=np.uint8)
             label = f"{label} (end)"
-        
-        # Resize frame
-        h, w = frame.shape[:2]
-        scale = resize_width / w
-        frame = cv2.resize(frame, (resize_width, int(h * scale)))
+        else:
+            # Determine target height from first valid frame to ensure consistency
+            h_orig, w_orig = frame.shape[:2]
+            if target_height is None:
+                scale = resize_width / w_orig
+                target_height = int(h_orig * scale)
+            
+            # Use fixed size resize to avoid off-by-one pixel errors between different videos
+            frame = cv2.resize(frame, (resize_width, target_height))
         
         # Add label
         frame = label_frame(frame, label)
         frames.append(frame)
     
-    return frames
+    return frames, new_indices
 
-def show_video_grid(video_dir, title="Video Grid", resize_width=250, grid_size=2, frame_skip=2, selected_files=None):
+def show_video_grid(video_dir, title="Video Grid", resize_width=300, grid_size=2, frame_skip=1, selected_files=None):
     """
     Display multiple videos in a grid with playback controls.
     
     Args:
         video_dir: Directory containing video files
         title: Window title
-        resize_width: Width of each video thumbnail in pixels (default 250 for performance)
-        grid_size: Grid dimensions (default 2 for 2x2 grid)
-        frame_skip: Skip every N frames for faster playback (default 2)
-        selected_files: List of specific filenames (e.g., ["F1C7LR_aug.mp4", ...]) to display. If None, defaults to first grid_size^2 videos.
-        
-    Controls:
-        - Space: Play/Pause
-        - ←/→: Seek backward/forward
-        - Slider: Jump to frame
-        - q: Quit
+        resize_width: Width of each video thumbnail
+        grid_size: Grid dimensions
+        frame_skip: Frames to skip per iteration (1 = every frame)
+        selected_files: List of specific filenames to display.
     """
     # Load videos
     files, caps = load_video_captures(video_dir)
@@ -171,98 +167,85 @@ def show_video_grid(video_dir, title="Video Grid", resize_width=250, grid_size=2
         print("No videos to display")
         return
     
-    # If specific files are requested, filter to those (preserve order)
     if selected_files is not None:
-        # Ensure we have the exact filenames (including extensions)
         selected_set = set(selected_files)
         filtered = [(f, cap) for f, cap in zip(files, caps) if f in selected_set]
         if not filtered:
-            print(f"No matching videos found for selection: {selected_files}")
+            print(f"No matching videos found for selection")
             return
         files, caps = zip(*filtered)
-        files = list(files)
-        caps = list(caps)
-        n = len(caps)
-        print(f"Displaying selected videos: {', '.join(files)}")
+        files = list(files); caps = list(caps); n = len(caps)
     
-    # Use fixed grid size for better performance (2x2 = 4 videos)
     grid_shape = (grid_size, grid_size)
-    
-    # Limit to first grid_size^2 videos for performance if more were passed
     max_videos = grid_size * grid_size
     if n > max_videos:
-        print(f"Showing first {max_videos} of {n} videos for performance")
-        files = files[:max_videos]
-        caps = caps[:max_videos]
-        n = max_videos
+        files = files[:max_videos]; caps = caps[:max_videos]; n = max_videos
     
     # Get video properties
     frame_counts = [int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) for cap in caps]
     fps_values = [cap.get(cv2.CAP_PROP_FPS) for cap in caps]
-    total_frames = min(frame_counts)
-    fps = min(fps_values) if fps_values else 30
+    total_frames = min(frame_counts) if frame_counts else 0
+    avg_fps = sum(fps_values)/len(fps_values) if fps_values else 30
     
-    # Cap display FPS for smoother performance
-    display_fps = min(fps, 15)
-    delay = int(1000 / display_fps)
+    # Target display FPS (higher for smoother playback)
+    display_fps = min(avg_fps, 30)
+    delay = max(1, int(1000 / display_fps))
     
-    # Print info
-    print(f"Grid layout: {grid_shape[0]}x{grid_shape[1]}")
-    print(f"Total frames: {total_frames}")
-    print(f"FPS: {fps:.2f}")
-    print(f"\nControls:")
-    print(f"  [Space] = Play/Pause")
-    print(f"  [←/→]   = Seek backward/forward")
-    print(f"  [Slider] = Jump to frame")
-    print(f"  [q]     = Quit and continue\n")
+    print(f"Grid: {grid_shape[0]}x{grid_shape[1]} | FPS: {avg_fps:.1f} | Frames: {total_frames}")
+    print("\nControls: [Space] Play/Pause, [<-/->] Seek, [q] Quit\n")
     
-    # Create window
     window_name = title
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     
-    # State
     playing = True
     frame_idx = 0
+    current_caps_indices = [0] * n
     
-    def update_frame(pos):
+    def on_trackbar(pos):
         nonlocal frame_idx
         frame_idx = pos
     
-    # Create trackbar
-    cv2.createTrackbar("Frame", window_name, 0, total_frames - 1, update_frame)
+    cv2.createTrackbar("Frame", window_name, 0, total_frames - 1, on_trackbar)
     
-    # Main playback loop
     while True:
-        # Auto-advance if playing (with frame skipping for performance)
-        if playing:
-            frame_idx += frame_skip
-            if frame_idx >= total_frames:
-                frame_idx = 0  # Loop
+        # Read frames using sequential optimization
+        frames, next_indices = read_frames_sequentially(
+            caps, files, current_caps_indices, frame_idx, resize_width
+        )
+        current_caps_indices = next_indices
         
-        # Read and display frames
-        frames = read_frames_at_position(caps, files, frame_idx, resize_width)
         grid_frame = arrange_in_grid(frames, grid_shape)
         cv2.imshow(window_name, grid_frame)
         cv2.setTrackbarPos("Frame", window_name, frame_idx)
         
-        # Handle keyboard input
+        # Handle timing
         key = cv2.waitKey(delay) & 0xFF
         
         if key == ord('q'):
             break
-        elif key == ord(' '):  # Spacebar toggle
+        elif key == ord(' '):
             playing = not playing
-        elif key == 81:  # Left arrow
-            frame_idx = max(0, frame_idx - 1)
+        elif key == 81: # Left
+            frame_idx = max(0, frame_idx - 10)
             playing = False
-        elif key == 83:  # Right arrow
-            frame_idx = min(total_frames - 1, frame_idx + 1)
+        elif key == 83: # Right
+            frame_idx = min(total_frames - 1, frame_idx + 10)
             playing = False
+        
+        if playing:
+            frame_idx += frame_skip
+            if frame_idx >= total_frames:
+                frame_idx = 0
+        else:
+            # If paused, wait for user input without advancing
+            key = cv2.waitKey(0) & 0xFF
+            if key == ord('q'): break
+            elif key == ord(' '): playing = True
+            elif key == 81: frame_idx = max(0, frame_idx - 1)
+            elif key == 83: frame_idx = min(total_frames - 1, frame_idx + 1)
     
-    # Cleanup
     cv2.destroyAllWindows()
-    for cap in caps:
-        cap.release()
+    for cap in caps: cap.release()
     
     print(f"Closed {title}\n")
 

@@ -21,7 +21,7 @@ def extract_audio_from_videos(video_dir: str, audio_dir: str, target_sr: int = 1
     if not ffmpeg_exists():
         raise RuntimeError("ffmpeg not found on PATH — required to extract audio. Install ffmpeg and retry.")
 
-    video_exts = {".mp4"}
+    video_exts = {".mp4", ".mov"}
     for fname in sorted(os.listdir(video_dir)):
         if os.path.splitext(fname)[1].lower() not in video_exts:
             continue

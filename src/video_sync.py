@@ -59,16 +59,19 @@ def _trim_stream_copy(input_path, output_path, trim):
 
 
 def _reencode_delay(input_path, output_path, offset):
-    """Fallback method: re-encode and shift using filter_complex."""
+    """
+    Fallback method: re-encode and shift using tpad filter.
+    This inserts actual black frames at the start, ensuring OpenCV respects the delay.
+    """
     ms = int(offset * 1000)
     return [
         "ffmpeg", "-y",
         "-i", input_path,
         "-filter_complex",
-        f"[0:v]setpts=PTS+{offset}/TB[v];"
-        f"[0:a]adelay={ms}:all=1,asetpts=N/SR/TB[a]",
+        f"[0:v]tpad=start_duration={offset}:color=black[v];"
+        f"[0:a]adelay={ms}|{ms}[a]",
         "-map", "[v]", "-map", "[a]",
-        "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
         "-c:a", "aac", "-b:a", "128k",
         output_path
     ]
@@ -80,7 +83,7 @@ def _reencode_trim(input_path, output_path, trim):
         "ffmpeg", "-y",
         "-ss", str(trim),
         "-i", input_path,
-        "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
         "-c:a", "aac", "-b:a", "128k",
         output_path
     ]
@@ -129,16 +132,13 @@ def apply_video_offsets(video_dir: str, offsets: Dict[str, float], output_dir: s
                 pass  # try full path below
 
         # positive offset = delay
+        # MUST re-encode to burn in black frames (tpad) so OpenCV respects the delay
         if off > 0:
             try:
-                _run(_delay_stream_copy(in_path, out_path, off))
-                continue
+                # Direct re-encode with tpad
+                _run(_reencode_delay(in_path, out_path, off))
             except Exception as e:
-                pbar.write(f"Stream-copy delay failed for {fname}: {e}")
-                try:
-                    _run(_reencode_delay(in_path, out_path, off))
-                except Exception as e2:
-                    pbar.write(f"Reencode delay also failed for {fname}: {e2}")
+                pbar.write(f"Reencode delay failed for {fname}: {e}")
 
         # negative offset = trim
         else:

@@ -93,6 +93,21 @@ def compute_gcc_phat(sig_a: np.ndarray, sig_b: np.ndarray, fs: int,
     else:
         confidence = float(peak / (noise_floor + 1e-8))
     confidence = confidence / (confidence + 1.0)
+    
+    # Verbose mode: show top correlation peaks for debugging
+    verbose = False  # Set to True for diagnostics
+    if verbose:
+        # Find top 3 peaks
+        mag_sorted_idx = np.argsort(mag)[::-1]
+        print(f"\n  Top 3 correlation peaks:")
+        for i in range(min(3, len(mag_sorted_idx))):
+            idx = mag_sorted_idx[i]
+            peak_lag = lags[idx]
+            peak_offset = peak_lag / float(fs)
+            peak_mag = mag[idx]
+            marker = "***" if idx == lag_idx else ""
+            print(f"    Peak {i+1}: offset={peak_offset:+.3f}s, mag={peak_mag:.3f} {marker}")
+    
     # Quality warnings
     if confidence < 0.3:
         warnings.warn(f"Low confidence ({confidence:.2f}) - sync may be unreliable")
