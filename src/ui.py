@@ -88,7 +88,7 @@ STEP1_HTML = """
         
         <div class="card">
             <h2 style="margin-bottom: 20px;">Step 1: Select Videos</h2>
-            <p style="color: #888; margin-bottom: 20px;">Choose exactly 4 video files from <code style="background: rgba(255,255,255,0.1); padding: 2px 8px; border-radius: 4px;">data/raw/</code></p>
+            <p style="color: #888; margin-bottom: 20px;">Choose exactly 4 video files</p>
             
             <div class="select-btn-wrapper">
                 <label class="btn btn-primary" for="fileInput">Select 4 Video Files</label>
@@ -110,27 +110,37 @@ STEP1_HTML = """
         
         fileInput.addEventListener('change', (e) => {
             const files = Array.from(e.target.files);
-            if (files.length !== 4) {
-                alert('Please select exactly 4 video files.');
+            // Allow any number of files >= 2
+            if (files.length < 2) {
+                alert('Please select at least 2 video files.');
                 return;
             }
             
-            const fileNames = files.map(f => f.name);
+            const formData = new FormData();
+            files.forEach(f => formData.append('files[]', f));
             
-            fetch('/api/select', {
+            // Show loading state
+            fileGrid.classList.remove('hidden');
+            fileGrid.innerHTML = '<div class="status-text">Uploading files... please wait.</div>';
+            
+            fetch('/api/upload', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({files: fileNames})
+                body: formData
             }).then(r => r.json()).then(data => {
                 if (data.ok) {
-                    fileGrid.classList.remove('hidden');
-                    fileGrid.innerHTML = fileNames.map(f => 
+                    fileGrid.innerHTML = data.files.map(f => 
                         `<div class="file-item">${f}</div>`
                     ).join('');
                     nextBtn.disabled = false;
                 } else {
                     alert(data.error);
+                    fileGrid.innerHTML = '';
+                    fileGrid.classList.add('hidden');
                 }
+            }).catch(err => {
+                alert('Upload failed: ' + err);
+                fileGrid.innerHTML = '';
+                fileGrid.classList.add('hidden');
             });
         });
         
@@ -142,17 +152,20 @@ STEP1_HTML = """
 </html>
 """
 
+# HTML for Step 2: Preview
 STEP2_HTML = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Video Synchronization - Step 2</title>
-    <style>""" + BASE_CSS + """</style>
+    <title>Step 2: Preview Videos</title>
+    <style>
+""" + BASE_CSS + """
+    </style>
 </head>
 <body>
     <div class="container">
-        <h1>Video Synchronization</h1>
-        <p class="subtitle">Multi-camera synchronization wizard</p>
+        <h1>Preview Original Videos</h1>
+        <div class="subtitle">Check if videos are loaded correctly</div>
         
         <div class="step-indicator">
             <div class="step-dot done">1</div>
@@ -161,76 +174,61 @@ STEP2_HTML = """
         </div>
         
         <div class="card">
-            <h2 style="margin-bottom: 20px;">Step 2: Preview (Before Sync)</h2>
-            <p style="color: #888; margin-bottom: 20px;">Review your videos before synchronization. Notice the timing differences.</p>
-            
-            <div class="btn-row" style="margin-bottom: 20px;">
-                <button class="btn btn-secondary" onclick="playAll()">Play All</button>
-                <button class="btn btn-secondary" onclick="pauseAll()">Pause All</button>
-                <button class="btn btn-secondary" onclick="restartAll()">Restart All</button>
-            </div>
-            
-            <div class="video-grid" id="videoGrid">
+            <div class="video-grid">
                 {% for file in files %}
-                <div>
-                    <div class="video-cell">
-                        <video class="sync-video" controls muted loop>
-                            <source src="/video/raw/{{ file }}" type="video/mp4">
-                        </video>
-                    </div>
+                <div class="video-cell">
+                    <video controls>
+                        <source src="/video/raw/{{ file }}" type="video/mp4">
+                        Your browser does not support the video tag.
+                    </video>
                     <div class="video-label">{{ file }}</div>
                 </div>
                 {% endfor %}
             </div>
             
             <div class="btn-row">
-                <button class="btn btn-secondary" onclick="goBack()">Back</button>
+                <button class="btn btn-secondary" onclick="window.history.back()">Back</button>
                 <button class="btn btn-primary" onclick="startSync()">Start Synchronization</button>
             </div>
         </div>
     </div>
     
     <script>
-        const videos = document.querySelectorAll('.sync-video');
-        
-        // Autoplay all videos when page loads
-        window.addEventListener('load', () => {
-            restartAll();
-        });
-        
-        function playAll() {
-            videos.forEach(v => v.play());
-        }
-        
-        function pauseAll() {
-            videos.forEach(v => v.pause());
-        }
-        
-        function restartAll() {
-            videos.forEach(v => {
-                v.currentTime = 0;
-                v.play();
+        function startSync() {
+            // Disable button and show progress
+            const btn = document.querySelector('button.btn-primary');
+            btn.disabled = true;
+            btn.innerText = "Synchronizing...";
+            
+            fetch('/api/sync').then(r => r.json()).then(data => {
+                if (data.ok) {
+                    window.location.href = '/step3';
+                } else {
+                    alert(data.error);
+                    btn.disabled = false;
+                    btn.innerText = "Start Synchronization";
+                }
             });
         }
-        
-        function goBack() { window.location.href = '/'; }
-        function startSync() { window.location.href = '/step3'; }
     </script>
 </body>
 </html>
 """
 
+# HTML for Step 3: Results
 STEP3_HTML = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Video Synchronization - Step 3</title>
-    <style>""" + BASE_CSS + """</style>
+    <title>Step 3: Synchronization Results</title>
+    <style>
+""" + BASE_CSS + """
+    </style>
 </head>
 <body>
     <div class="container">
-        <h1>Video Synchronization</h1>
-        <p class="subtitle">Multi-camera synchronization wizard</p>
+        <h1>Synchronization Complete</h1>
+        <div class="subtitle">Review synchronized playback</div>
         
         <div class="step-indicator">
             <div class="step-dot done">1</div>
@@ -239,165 +237,85 @@ STEP3_HTML = """
         </div>
         
         <div class="card">
-            <h2 style="margin-bottom: 20px;">Step 3: Synchronization</h2>
-            
-            <div id="syncingView">
-                <p style="color: #888; margin-bottom: 20px;">Processing your videos...</p>
+            <div id="progressSection">
+                <div class="status-text" id="statusText">Processing...</div>
                 <div class="progress-container">
                     <div class="progress-bar" id="progressBar">0%</div>
                 </div>
-                <p class="status-text" id="statusText">Starting...</p>
             </div>
             
-            <div id="resultView" class="hidden">
-                <p style="color: #00cc66; margin-bottom: 20px;">Synchronization complete! Review the results below.</p>
-                
-                <div class="video-grid" id="resultGrid"></div>
-                
-                <!-- Playback Controls -->
-                <div class="btn-row" style="margin: 20px 0 10px 0;">
-                    <button class="btn btn-secondary" id="playPauseBtn" onclick="togglePlayPause()">▶ Play</button>
-                    <button class="btn btn-secondary" onclick="restartAllResult()">⟲ Restart</button>
-                </div>
-                
-                <!-- Universal Seek Bar -->
-                <div class="seek-bar-container">
-                    <div class="seek-bar-label">Universal Seek Control</div>
-                    <input type="range" class="seek-bar" id="universalSeekBar" min="0" max="100" value="0" step="0.1">
-                    <div class="seek-time" id="seekTime">0:00 / 0:00</div>
+            <div id="resultSection" class="hidden">
+                <div class="video-grid">
+                    <!-- Synced videos will be injected here -->
                 </div>
                 
                 <div class="btn-row">
-                    <button class="btn btn-secondary" onclick="location.href='/'">Start Over</button>
-                    <a class="btn btn-success" href="/api/download" download>Download All Videos (ZIP)</a>
+                     <button id="playPauseBtn" class="btn btn-primary" onclick="togglePlayPause()">⏸ Pause</button>
+                     <button class="btn btn-secondary" onclick="restartAllResult()">↺ Restart</button>
+                </div>
+
+                <div class="seek-bar-container">
+                    <div class="seek-bar-label">Universal Seek Bar</div>
+                    <input type="range" min="0" max="100" value="0" class="seek-bar" id="universalSeekBar">
+                    <div class="seek-time" id="seekTimeDisplay">00:00 / 00:00</div>
+                </div>
+                
+                <div class="btn-row">
+                    <a href="/api/download_all" class="btn btn-success">Download All (ZIP)</a>
+                    <a href="/" class="btn btn-secondary">Start Over</a>
                 </div>
             </div>
         </div>
     </div>
     
     <script>
-        // Start sync immediately when page loads
-        fetch('/api/sync').then(r => r.json());
+        let pollInterval;
         
-        // Poll progress
-        const poll = setInterval(() => {
+        function checkProgress() {
             fetch('/api/progress').then(r => r.json()).then(data => {
+                document.getElementById('statusText').innerText = data.status;
                 document.getElementById('progressBar').style.width = data.progress + '%';
-                document.getElementById('progressBar').textContent = data.progress + '%';
-                document.getElementById('statusText').textContent = data.status;
+                document.getElementById('progressBar').innerText = data.progress + '%';
                 
                 if (data.progress >= 100) {
-                    clearInterval(poll);
-                    setTimeout(showResults, 500);
+                    clearInterval(pollInterval);
+                    setTimeout(showResults, 1000);
                 }
             });
-        }, 500);
+        }
         
         function showResults() {
-            document.getElementById('syncingView').classList.add('hidden');
-            document.getElementById('resultView').classList.remove('hidden');
+            document.getElementById('progressSection').classList.add('hidden');
             
-            // Load synced video grid
             fetch('/api/synced_files').then(r => r.json()).then(data => {
-                const grid = document.getElementById('resultGrid');
-                grid.innerHTML = data.files.map(f => `
-                    <div>
+                if (data.ok) {
+                    const grid = document.querySelector('#resultSection .video-grid');
+                    grid.innerHTML = data.files.map(f => `
                         <div class="video-cell">
-                            <video class="result-video" controls muted loop>
+                            <video class="result-video" muted playsinline>
                                 <source src="/video/synced/${f}" type="video/mp4">
                             </video>
+                            <div class="video-label">${f}</div>
                         </div>
-                        <div class="video-label">${f}</div>
-                    </div>
-                `).join('');
-                
-                // Initialize seek bar functionality and start playing
-                setTimeout(() => {
-                    initSeekBar();
-                    restartAllResult(); // This will set button to "Pause" state
-                }, 100);
-            });
-        }
-        
-        function initSeekBar() {
-            const seekBar = document.getElementById('universalSeekBar');
-            const seekTime = document.getElementById('seekTime');
-            const videos = document.querySelectorAll('.result-video');
-            
-            if (!videos.length) return;
-            
-            let isUserSeeking = false;
-            
-            // Update seek bar when user drags it
-            seekBar.addEventListener('input', (e) => {
-                isUserSeeking = true;
-                const percent = parseFloat(e.target.value);
-                const firstVideo = videos[0];
-                
-                if (firstVideo.duration) {
-                    const time = (percent / 100) * firstVideo.duration;
-                    videos.forEach(v => v.currentTime = time);
-                    updateTimeDisplay(time, firstVideo.duration);
-                }
-            });
-            
-            seekBar.addEventListener('change', () => {
-                isUserSeeking = false;
-            });
-            
-            // Update seek bar continuously as videos play
-            setInterval(() => {
-                if (!isUserSeeking && videos[0].duration) {
-                    const currentTime = videos[0].currentTime;
-                    const duration = videos[0].duration;
-                    const percent = (currentTime / duration) * 100;
+                    `).join('');
                     
-                    seekBar.value = percent;
-                    updateTimeDisplay(currentTime, duration);
+                    document.getElementById('resultSection').classList.remove('hidden');
+                    initSeekBar(); // Initialize the seek bar after videos are added
+                    restartAllResult(); // Start playing automatically
                 }
-            }, 100);
-            
-            function updateTimeDisplay(current, total) {
-                const formatTime = (seconds) => {
-                    const mins = Math.floor(seconds / 60);
-                    const secs = Math.floor(seconds % 60);
-                    return `${mins}:${secs.toString().padStart(2, '0')}`;
-                };
-                
-                seekTime.textContent = `${formatTime(current)} / ${formatTime(total)}`;
-            }
-        }
-        
-        function togglePlayPause() {
-            const videos = document.querySelectorAll('.result-video');
-            const btn = document.getElementById('playPauseBtn');
-            
-            if (!videos.length) return;
-            
-            // Check if videos are playing by checking the first video
-            const isPlaying = !videos[0].paused;
-            
-            if (isPlaying) {
-                videos.forEach(v => v.pause());
-                btn.textContent = '▶ Play';
-            } else {
-                videos.forEach(v => v.play());
-                btn.textContent = '⏸ Pause';
-            }
+            });
         }
         
         function playAllResult() {
-            const videos = document.querySelectorAll('.result-video');
+            document.querySelectorAll('.result-video').forEach(v => v.play());
             const btn = document.getElementById('playPauseBtn');
-            videos.forEach(v => v.play());
-            if (btn) btn.textContent = '⏸ Pause';
+            btn.innerHTML = "⏸ Pause"; // Update button to 'Pause' state
         }
         
         function pauseAllResult() {
-            const videos = document.querySelectorAll('.result-video');
+            document.querySelectorAll('.result-video').forEach(v => v.pause());
             const btn = document.getElementById('playPauseBtn');
-            videos.forEach(v => v.pause());
-            if (btn) btn.textContent = '▶ Play';
+            btn.innerHTML = "▶ Play"; // Update button to 'Play' state
         }
         
         function restartAllResult() {
@@ -407,8 +325,68 @@ STEP3_HTML = """
                 v.currentTime = 0;
                 v.play();
             });
-            if (btn) btn.textContent = '⏸ Pause';
+            if (btn) btn.innerHTML = "⏸ Pause";
         }
+        
+        function togglePlayPause() {
+            const video = document.querySelector('.result-video');
+            if (video && !video.paused) {
+                 pauseAllResult();
+            } else {
+                 playAllResult();
+            }
+        }
+        
+        // --- Universal Seek Bar Logic ---
+        const seekBar = document.getElementById('universalSeekBar');
+        const timeDisplay = document.getElementById('seekTimeDisplay');
+        let isDragging = false;
+        
+        function initSeekBar() {
+            const videos = document.querySelectorAll('.result-video');
+            if (videos.length === 0) return;
+            
+            // Assume all synced videos have same length (ensured by backend)
+            // Wait for metadata to load to set max
+            videos[0].addEventListener('loadedmetadata', () => {
+                 seekBar.max = videos[0].duration;
+                 updateTimeDisplay(0, videos[0].duration);
+            });
+            
+            // Update slider as video plays
+            setInterval(() => {
+                if (!isDragging && !videos[0].paused) {
+                    seekBar.value = videos[0].currentTime;
+                    updateTimeDisplay(videos[0].currentTime, videos[0].duration);
+                }
+            }, 100);
+            
+            // Handle User Seek
+            seekBar.addEventListener('input', () => {
+                isDragging = true;
+                const time = parseFloat(seekBar.value);
+                videos.forEach(v => v.currentTime = time);
+                updateTimeDisplay(time, videos[0].duration);
+            });
+            
+            seekBar.addEventListener('change', () => {
+                isDragging = false;
+                const time = parseFloat(seekBar.value);
+                videos.forEach(v => v.currentTime = time);
+            });
+        }
+        
+        function updateTimeDisplay(current, total) {
+             const format = (t) => {
+                 if (isNaN(t)) return "00:00";
+                 const m = Math.floor(t / 60);
+                 const s = Math.floor(t % 60);
+                 return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+             };
+             timeDisplay.innerText = `${format(current)} / ${format(total)}`;
+        }
+        
+        pollInterval = setInterval(checkProgress, 1000);
     </script>
 </body>
 </html>
@@ -528,6 +506,44 @@ def api_sync():
     
     return jsonify({"ok": True})
 
+@app.route('/api/upload', methods=['POST'])
+def api_upload():
+    if 'files[]' not in request.files:
+        return jsonify({"ok": False, "error": "No files part in the request"})
+    
+    uploaded_files = request.files.getlist('files[]')
+    
+    if len(uploaded_files) < 2:
+        return jsonify({"ok": False, "error": "Please upload at least 2 files"})
+        
+    saved_filenames = []
+    
+    # Ensure raw directory exists
+    os.makedirs(config.VIDEO_DIR, exist_ok=True)
+    
+    from werkzeug.utils import secure_filename
+    ALLOWED_EXTENSIONS = {'.mp4', '.mov', '.avi'}
+    
+    for file in uploaded_files:
+        if file.filename == '':
+            continue
+            
+        _, ext = os.path.splitext(file.filename)
+        if ext.lower() not in ALLOWED_EXTENSIONS:
+            return jsonify({"ok": False, "error": f"File type not allowed: {file.filename}. Only .mp4, .mov, .avi allowed."})
+            
+        filename = secure_filename(file.filename)
+        save_path = os.path.join(config.VIDEO_DIR, filename)
+        
+        try:
+            file.save(save_path)
+            saved_filenames.append(filename)
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Failed to save {filename}: {str(e)}"})
+            
+    app_state["selected_files"] = saved_filenames
+    return jsonify({"ok": True, "files": saved_filenames})
+
 @app.route('/api/progress')
 def api_progress():
     return jsonify({
@@ -546,7 +562,7 @@ def api_synced_files():
             if os.path.exists(os.path.join(output_dir, f"{base}_synced{ext}")):
                 result.append(f"{base}_synced{ext}")
                 break
-    return jsonify({"files": result})
+    return jsonify({"ok": True, "files": result})
 
 @app.route('/api/download')
 def api_download():
