@@ -454,6 +454,9 @@ def api_select():
     app_state["selected_files"] = files
     return jsonify({"ok": True})
 
+from . import preprocess
+from . import audio_sync
+
 @app.route('/api/sync')
 def api_sync():
     if not app_state["selected_files"]:
@@ -468,10 +471,43 @@ def api_sync():
             video_dir = config.VIDEO_DIR
             output_dir = app_state["output_dir"]
             
-            app_state["sync_progress"] = 10
-            app_state["sync_status"] = "Extracting motion energy..."
+            method = getattr(config, "SYNC_METHOD", "visual")
+            print(f"Using synchronization method: {method}")
             
-            offsets = sync_videos_by_motion(video_dir, files, max_offset_sec=20.0, output_dir=config.VISUAL_SYNC_OUTPUT_DIR)
+            if method == "audio":
+                # Audio-based sync
+                app_state["sync_progress"] = 10
+                app_state["sync_status"] = "Extracting audio..."
+                
+                audio_dir = config.AUDIO_DIR
+                preprocess.extract_audio_from_videos(video_dir, audio_dir)
+                
+                app_state["sync_progress"] = 40
+                app_state["sync_status"] = "Analyzing audio offsets..."
+                
+                audio_offsets = audio_sync.estimate_offsets_robust(
+                    audio_dir, 
+                    max_offset_sec=20.0,
+                    min_confidence=0.2
+                )
+                
+                # Convert wav filenames back to video filenames
+                offsets = {}
+                for vid_file in files:
+                    wav_name = os.path.splitext(vid_file)[0] + ".wav"
+                    if wav_name in audio_offsets:
+                        offsets[vid_file] = audio_offsets[wav_name]
+                    else:
+                        print(f"Warning: No audio offset found for {vid_file}")
+                        offsets[vid_file] = 0.0
+                
+            else:
+                # Visual-based sync (default)
+                app_state["sync_progress"] = 10
+                app_state["sync_status"] = "Extracting motion energy..."
+                
+                offsets = sync_videos_by_motion(video_dir, files, max_offset_sec=20.0, output_dir=config.VISUAL_SYNC_OUTPUT_DIR)
+            
             app_state["offsets"] = offsets
             
             app_state["sync_progress"] = 60
@@ -483,6 +519,7 @@ def api_sync():
             app_state["sync_status"] = "Complete!"
             
         except Exception as e:
+            print(f"Sync error: {e}")
             app_state["sync_status"] = f"Error: {e}"
             app_state["sync_progress"] = 0
     

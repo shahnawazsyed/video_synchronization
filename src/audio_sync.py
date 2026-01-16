@@ -248,6 +248,9 @@ def estimate_offsets_robust(audio_dir: str,
         Add these offsets to each file's timestamps to align them.
     """
     wavs = sorted([f for f in os.listdir(audio_dir) if f.lower().endswith(".wav")])
+    if len(wavs) == 0:
+        raise ValueError(f"No WAV files found in {audio_dir}")
+        
     # Step 1: Compute all pairwise offsets
     pairwise = compute_pairwise_offsets(
         audio_dir, 
