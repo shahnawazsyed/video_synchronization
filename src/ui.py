@@ -60,6 +60,12 @@ h1 { text-align: center; color: #00d9ff; margin-bottom: 8px; font-size: 28px; }
 .hidden { display: none; }
 input[type="file"] { display: none; }
 .select-btn-wrapper { text-align: center; margin: 30px 0; }
+.seek-bar-container { margin: 20px 0; padding: 15px; background: rgba(255,255,255,0.05); border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); }
+.seek-bar-label { text-align: center; font-size: 13px; color: #00d9ff; margin-bottom: 10px; font-weight: 600; }
+.seek-bar { width: 100%; height: 8px; border-radius: 4px; background: rgba(255,255,255,0.2); outline: none; cursor: pointer; -webkit-appearance: none; appearance: none; }
+.seek-bar::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 18px; height: 18px; border-radius: 50%; background: linear-gradient(135deg, #00d9ff, #0077ff); cursor: pointer; box-shadow: 0 0 10px rgba(0,217,255,0.5); }
+.seek-bar::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; background: linear-gradient(135deg, #00d9ff, #0077ff); cursor: pointer; border: none; box-shadow: 0 0 10px rgba(0,217,255,0.5); }
+.seek-time { text-align: center; font-size: 12px; color: #888; margin-top: 8px; font-family: monospace; }
 """
 
 STEP1_HTML = """
@@ -246,13 +252,20 @@ STEP3_HTML = """
             <div id="resultView" class="hidden">
                 <p style="color: #00cc66; margin-bottom: 20px;">Synchronization complete! Review the results below.</p>
                 
-                <div class="btn-row" style="margin-bottom: 20px;">
-                    <button class="btn btn-secondary" onclick="playAllResult()">Play All</button>
-                    <button class="btn btn-secondary" onclick="pauseAllResult()">Pause All</button>
-                    <button class="btn btn-secondary" onclick="restartAllResult()">Restart All</button>
+                <div class="video-grid" id="resultGrid"></div>
+                
+                <!-- Playback Controls -->
+                <div class="btn-row" style="margin: 20px 0 10px 0;">
+                    <button class="btn btn-secondary" id="playPauseBtn" onclick="togglePlayPause()">▶ Play</button>
+                    <button class="btn btn-secondary" onclick="restartAllResult()">⟲ Restart</button>
                 </div>
                 
-                <div class="video-grid" id="resultGrid"></div>
+                <!-- Universal Seek Bar -->
+                <div class="seek-bar-container">
+                    <div class="seek-bar-label">Universal Seek Control</div>
+                    <input type="range" class="seek-bar" id="universalSeekBar" min="0" max="100" value="0" step="0.1">
+                    <div class="seek-time" id="seekTime">0:00 / 0:00</div>
+                </div>
                 
                 <div class="btn-row">
                     <button class="btn btn-secondary" onclick="location.href='/'">Start Over</button>
@@ -298,24 +311,103 @@ STEP3_HTML = """
                     </div>
                 `).join('');
                 
-                // Autoplay result videos
-                setTimeout(restartAllResult, 100);
+                // Initialize seek bar functionality and start playing
+                setTimeout(() => {
+                    initSeekBar();
+                    restartAllResult(); // This will set button to "Pause" state
+                }, 100);
             });
+        }
+        
+        function initSeekBar() {
+            const seekBar = document.getElementById('universalSeekBar');
+            const seekTime = document.getElementById('seekTime');
+            const videos = document.querySelectorAll('.result-video');
+            
+            if (!videos.length) return;
+            
+            let isUserSeeking = false;
+            
+            // Update seek bar when user drags it
+            seekBar.addEventListener('input', (e) => {
+                isUserSeeking = true;
+                const percent = parseFloat(e.target.value);
+                const firstVideo = videos[0];
+                
+                if (firstVideo.duration) {
+                    const time = (percent / 100) * firstVideo.duration;
+                    videos.forEach(v => v.currentTime = time);
+                    updateTimeDisplay(time, firstVideo.duration);
+                }
+            });
+            
+            seekBar.addEventListener('change', () => {
+                isUserSeeking = false;
+            });
+            
+            // Update seek bar continuously as videos play
+            setInterval(() => {
+                if (!isUserSeeking && videos[0].duration) {
+                    const currentTime = videos[0].currentTime;
+                    const duration = videos[0].duration;
+                    const percent = (currentTime / duration) * 100;
+                    
+                    seekBar.value = percent;
+                    updateTimeDisplay(currentTime, duration);
+                }
+            }, 100);
+            
+            function updateTimeDisplay(current, total) {
+                const formatTime = (seconds) => {
+                    const mins = Math.floor(seconds / 60);
+                    const secs = Math.floor(seconds % 60);
+                    return `${mins}:${secs.toString().padStart(2, '0')}`;
+                };
+                
+                seekTime.textContent = `${formatTime(current)} / ${formatTime(total)}`;
+            }
+        }
+        
+        function togglePlayPause() {
+            const videos = document.querySelectorAll('.result-video');
+            const btn = document.getElementById('playPauseBtn');
+            
+            if (!videos.length) return;
+            
+            // Check if videos are playing by checking the first video
+            const isPlaying = !videos[0].paused;
+            
+            if (isPlaying) {
+                videos.forEach(v => v.pause());
+                btn.textContent = '▶ Play';
+            } else {
+                videos.forEach(v => v.play());
+                btn.textContent = '⏸ Pause';
+            }
         }
         
         function playAllResult() {
-            document.querySelectorAll('.result-video').forEach(v => v.play());
+            const videos = document.querySelectorAll('.result-video');
+            const btn = document.getElementById('playPauseBtn');
+            videos.forEach(v => v.play());
+            if (btn) btn.textContent = '⏸ Pause';
         }
         
         function pauseAllResult() {
-            document.querySelectorAll('.result-video').forEach(v => v.pause());
+            const videos = document.querySelectorAll('.result-video');
+            const btn = document.getElementById('playPauseBtn');
+            videos.forEach(v => v.pause());
+            if (btn) btn.textContent = '▶ Play';
         }
         
         function restartAllResult() {
-            document.querySelectorAll('.result-video').forEach(v => {
+            const videos = document.querySelectorAll('.result-video');
+            const btn = document.getElementById('playPauseBtn');
+            videos.forEach(v => {
                 v.currentTime = 0;
                 v.play();
             });
+            if (btn) btn.textContent = '⏸ Pause';
         }
     </script>
 </body>

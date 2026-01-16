@@ -31,6 +31,26 @@ def _run(cmd):
     return result.stdout.decode("utf8")
 
 
+def _get_video_duration(video_path):
+    """Get video duration in seconds using ffprobe."""
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        video_path
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True
+        )
+        return float(result.stdout.decode("utf8").strip())
+    except Exception as e:
+        raise RuntimeError(f"Failed to get duration for {video_path}: {e}")
+
+
 def _delay_stream_copy(input_path, output_path, offset):
     """
     Positive offset: delay entire file using -itsoffset.
@@ -58,18 +78,56 @@ def _trim_stream_copy(input_path, output_path, trim):
     ]
 
 
-def _reencode_delay(input_path, output_path, offset):
+def _reencode_delay(input_path, output_path, offset, end_pad=0):
     """
     Fallback method: re-encode and shift using tpad filter.
-    This inserts actual black frames at the start, ensuring OpenCV respects the delay.
+    This inserts actual black frames at the start and/or end, ensuring OpenCV respects the delay.
+    
+    Parameters
+    ----------
+    input_path : str
+        Path to input video
+    output_path : str
+        Path to output video
+    offset : float
+        Start padding duration in seconds (black frames at the beginning)
+    end_pad : float
+        End padding duration in seconds (black frames at the end)
     """
     ms = int(offset * 1000)
+    
+    # Build tpad filter - start_duration for beginning, stop_duration for end
+    tpad_params = []
+    if offset > 0:
+        tpad_params.append(f"start_duration={offset}")
+    if end_pad > 0:
+        tpad_params.append(f"stop_duration={end_pad}")
+    
+    if tpad_params:
+        tpad_str = f"[0:v]tpad={':'.join(tpad_params)}:color=black[v]"
+    else:
+        tpad_str = "[0:v]copy[v]"
+    
+    # Audio delay for start, and apad for end
+    audio_filters = []
+    if offset > 0:
+        audio_filters.append(f"adelay={ms}|{ms}")
+    if end_pad > 0:
+        # Convert to milliseconds for apad
+        end_ms = int(end_pad * 1000)
+        audio_filters.append(f"apad=pad_dur={end_ms}ms")
+    
+    if audio_filters:
+        audio_str = f"[0:a]{','.join(audio_filters)}[a]"
+    else:
+        audio_str = "[0:a]copy[a]"
+    
+    filter_complex = f"{tpad_str};{audio_str}"
+    
     return [
         "ffmpeg", "-y",
         "-i", input_path,
-        "-filter_complex",
-        f"[0:v]tpad=start_duration={offset}:color=black[v];"
-        f"[0:a]adelay={ms}|{ms}[a]",
+        "-filter_complex", filter_complex,
         "-map", "[v]", "-map", "[a]",
         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
         "-c:a", "aac", "-b:a", "128k",
@@ -111,6 +169,41 @@ def apply_video_offsets(video_dir: str, offsets: Dict[str, float], output_dir: s
 
     os.makedirs(output_dir, exist_ok=True)
 
+    # Step 1: Get durations and calculate max final duration
+    if verbose:
+        print("Calculating video durations...")
+    
+    durations = {}
+    final_durations = {}
+    
+    for fname in offsets.keys():
+        in_path = os.path.join(video_dir, fname)
+        if not os.path.exists(in_path):
+            print(f"WARNING: missing input {in_path}")
+            continue
+        
+        try:
+            duration = _get_video_duration(in_path)
+            durations[fname] = duration
+            
+            # Final duration = original duration + offset (if positive) - trim (if negative)
+            # Positive offset adds to duration, negative offset reduces it
+            final_durations[fname] = duration + offsets[fname]
+            
+            if verbose:
+                print(f"  {fname}: {duration:.2f}s → {final_durations[fname]:.2f}s")
+        except Exception as e:
+            print(f"ERROR getting duration for {fname}: {e}")
+            continue
+    
+    # Find the maximum final duration
+    max_duration = max(final_durations.values()) if final_durations else 0
+    
+    if verbose:
+        print(f"\nMax final duration: {max_duration:.2f}s")
+        print(f"\nSynchronizing videos...\n")
+
+    # Step 2: Apply offsets with end padding
     pbar = tqdm(offsets.items(), disable=not verbose, desc="sync_videos", unit="file")
 
     for fname, off in pbar:
@@ -123,37 +216,76 @@ def apply_video_offsets(video_dir: str, offsets: Dict[str, float], output_dir: s
 
         pbar.set_postfix({"file": fname, "offset": f"{off:.3f}s"})
 
-        if not os.path.exists(in_path):
-            pbar.write(f"WARNING: missing input {in_path}")
+        if not os.path.exists(in_path) or fname not in durations:
+            pbar.write(f"WARNING: skipping {fname}")
             continue
+        
+        # Calculate end padding needed
+        # end_pad = max_duration - (original_duration + offset)
+        end_pad = max(0, max_duration - final_durations[fname])
 
-        # tiny offset → just copy
-        if abs(off) < EPS:
+        # tiny offset and no end padding → just copy
+        if abs(off) < EPS and end_pad < EPS:
             try:
                 _run(["ffmpeg", "-y", "-i", in_path, "-c", "copy", out_path])
                 continue
             except Exception:
                 pass  # try full path below
 
-        # positive offset = delay
+        # positive offset = delay (may also need end padding)
         # MUST re-encode to burn in black frames (tpad) so OpenCV respects the delay
         if off > 0:
             try:
-                # Direct re-encode with tpad
-                _run(_reencode_delay(in_path, out_path, off))
+                # Re-encode with start padding and end padding
+                _run(_reencode_delay(in_path, out_path, off, end_pad))
             except Exception as e:
                 pbar.write(f"Reencode delay failed for {fname}: {e}")
 
-        # negative offset = trim
-        else:
+        # negative offset = trim (may also need end padding)
+        elif off < 0:
             trim = abs(off)
-            try:
-                _run(_trim_stream_copy(in_path, out_path, trim))
-                continue
-            except Exception as e:
-                pbar.write(f"Stream-copy trim failed for {fname}: {e}")
+            
+            # If we need end padding after trimming, we must re-encode
+            if end_pad > EPS:
                 try:
-                    _run(_reencode_trim(in_path, out_path, trim))
-                except Exception as e2:
-                    pbar.write(f"Reencode trim also failed for {fname}: {e2}")
+                    # We need to trim AND pad the end
+                    # Use a filter that trims then pads
+                    trim_ms = int(trim * 1000)
+                    end_ms = int(end_pad * 1000)
+                    
+                    cmd = [
+                        "ffmpeg", "-y",
+                        "-ss", str(trim),  # Trim from start
+                        "-i", in_path,
+                        "-filter_complex",
+                        f"[0:v]tpad=stop_duration={end_pad}:color=black[v];"
+                        f"[0:a]apad=pad_dur={end_ms}ms[a]",
+                        "-map", "[v]", "-map", "[a]",
+                        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+                        "-c:a", "aac", "-b:a", "128k",
+                        out_path
+                    ]
+                    _run(cmd)
+                except Exception as e:
+                    pbar.write(f"Trim + end pad failed for {fname}: {e}")
+            else:
+                # Just trim, no end padding needed
+                try:
+                    _run(_trim_stream_copy(in_path, out_path, trim))
+                    continue
+                except Exception as e:
+                    pbar.write(f"Stream-copy trim failed for {fname}: {e}")
+                    try:
+                        _run(_reencode_trim(in_path, out_path, trim))
+                    except Exception as e2:
+                        pbar.write(f"Reencode trim also failed for {fname}: {e2}")
+        
+        # zero offset but needs end padding
+        else:
+            try:
+                _run(_reencode_delay(in_path, out_path, 0, end_pad))
+            except Exception as e:
+                pbar.write(f"End padding failed for {fname}: {e}")
+    
     return True
+
