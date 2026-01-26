@@ -177,7 +177,7 @@ STEP2_HTML = """
             <div class="video-grid">
                 {% for file in files %}
                 <div class="video-cell">
-                    <video controls>
+                    <video controls autoplay muted playsinline>
                         <source src="/video/raw/{{ file }}" type="video/mp4">
                         Your browser does not support the video tag.
                     </video>
