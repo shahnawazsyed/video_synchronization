@@ -61,7 +61,7 @@ app_state = {
     "selected_files": [],
     "sync_progress": 0,
     "sync_status": "idle",
-    "output_dir": tempfile.mkdtemp(prefix="sync_output_"),
+    "output_dir": config.OUTPUT_DIR,
     "current_step": 1,
     "offsets": {},
 }
