@@ -8,13 +8,53 @@ import tempfile
 import threading
 import webbrowser
 import zipfile
+import logging
+import logging.handlers
 from flask import Flask, render_template_string, request, jsonify, send_from_directory, send_file
 
 from .visual_sync import sync_videos_by_motion
 from .video_sync import apply_video_offsets
 from . import config
 
+# Clean up any existing handlers to avoid duplication
+root_logger = logging.getLogger()
+if root_logger.handlers:
+    for handler in root_logger.handlers:
+        root_logger.removeHandler(handler)
+
+def configure_logging():
+    """Setup centralized logging to file and console."""
+    log_dir = "logs"
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    
+    log_file = os.path.join(log_dir, "video_sync.log")
+    
+    # Format: Time - LoggerName - Level - Message
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    
+    # 1. Rotating File Handler (10MB, 5 backups)
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_file, maxBytes=10*1024*1024, backupCount=5
+    )
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(logging.INFO)
+    
+    # 2. Console Handler
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(logging.INFO)
+    
+    # Configure Root Logger
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    logging.info("Logging initialized. Writing to %s", log_file)
+
 app = Flask(__name__)
+logger = logging.getLogger(__name__)
 
 # Global state
 app_state = {
@@ -394,11 +434,14 @@ STEP3_HTML = """
 
 # --- Routes ---
 
+import uuid
+
 @app.route('/')
 def step1():
     app_state["current_step"] = 1
     app_state["selected_files"] = []
     app_state["sync_progress"] = 0
+    app_state["session_id"] = f"req_{str(uuid.uuid4())[:8]}"
     return STEP1_HTML
 
 @app.route('/step2')
@@ -418,18 +461,22 @@ def step3():
 
 @app.route('/api/select', methods=['POST'])
 def api_select():
+    sid = app_state.get("session_id", "unknown")
     data = request.json
     files = data.get('files', [])
     if len(files) < 2:
+        logger.warning("[%s] Select failed: <2 files selected", sid)
         return jsonify({"ok": False, "error": "Please select at least 2 files."})
     
     # Validate files exist
     video_dir = config.VIDEO_DIR
     for fname in files:
         if not os.path.exists(os.path.join(video_dir, fname)):
+            logger.error("[%s] Select failed: File not found %s", sid, fname)
             return jsonify({"ok": False, "error": f"File not found: {fname}. Make sure files are in {video_dir}"})
     
     app_state["selected_files"] = files
+    logger.info("[%s] Selected files: %s", sid, files)
     return jsonify({"ok": True})
 
 from . import preprocess
@@ -437,7 +484,9 @@ from . import audio_sync
 
 @app.route('/api/sync')
 def api_sync():
+    sid = app_state.get("session_id", "unknown")
     if not app_state["selected_files"]:
+        logger.warning("[%s] Sync failed: No files selected", sid)
         return jsonify({"ok": False, "error": "No files selected."})
     
     app_state["sync_progress"] = 0
@@ -450,12 +499,13 @@ def api_sync():
             output_dir = app_state["output_dir"]
             
             method = getattr(config, "SYNC_METHOD", "visual")
-            print(f"Using synchronization method: {method}")
+            logger.info("[%s] Using synchronization method: %s", sid, method)
             
             if method == "audio":
                 # Audio-based sync
                 app_state["sync_progress"] = 10
                 app_state["sync_status"] = "Extracting audio..."
+                logger.info("[%s] Starting Audio Extraction...", sid)
                 
                 audio_dir = config.AUDIO_DIR
                 preprocess.extract_audio_from_videos(video_dir, audio_dir)
@@ -463,10 +513,14 @@ def api_sync():
                 app_state["sync_progress"] = 40
                 app_state["sync_status"] = "Analyzing audio offsets..."
                 
+                max_off = 20.0
+                min_conf = 0.2
+                logger.info("[%s] Estimating Audio Offsets (max_offset=%.1fs, min_confidence=%.2f)...", sid, max_off, min_conf)
+                
                 audio_offsets = audio_sync.estimate_offsets_robust(
                     audio_dir, 
-                    max_offset_sec=20.0,
-                    min_confidence=0.2
+                    max_offset_sec=max_off,
+                    min_confidence=min_conf
                 )
                 
                 # Convert wav filenames back to video filenames
@@ -476,17 +530,22 @@ def api_sync():
                     if wav_name in audio_offsets:
                         offsets[vid_file] = audio_offsets[wav_name]
                     else:
-                        print(f"Warning: No audio offset found for {vid_file}")
+                        logger.warning("[%s] No audio offset found for %s", sid, vid_file)
                         offsets[vid_file] = 0.0
                 
             else:
                 # Visual-based sync (default)
                 app_state["sync_progress"] = 10
                 app_state["sync_status"] = "Extracting motion energy..."
+                logger.info("[%s] Starting Visual Sync...", sid)
                 
-                offsets = sync_videos_by_motion(video_dir, files, max_offset_sec=20.0, output_dir=config.VISUAL_SYNC_OUTPUT_DIR)
+                max_off = 20.0
+                logger.info("[%s] Estimating Motion Offsets (max_offset=%.1fs)...", sid, max_off)
+                
+                offsets = sync_videos_by_motion(video_dir, files, max_offset_sec=max_off, output_dir=config.VISUAL_SYNC_OUTPUT_DIR)
             
             app_state["offsets"] = offsets
+            logger.info("[%s] Offsets calculated: %s", sid, offsets)
             
             app_state["sync_progress"] = 60
             app_state["sync_status"] = "Applying offsets to videos..."
@@ -495,9 +554,10 @@ def api_sync():
             
             app_state["sync_progress"] = 100
             app_state["sync_status"] = "Complete!"
+            logger.info("[%s] Synchronization process complete.", sid)
             
         except Exception as e:
-            print(f"Sync error: {e}")
+            logger.error("[%s] Sync error: %s", sid, e, exc_info=True)
             app_state["sync_status"] = f"Error: {e}"
             app_state["sync_progress"] = 0
     
@@ -508,6 +568,7 @@ def api_sync():
 
 @app.route('/api/upload', methods=['POST'])
 def api_upload():
+    sid = app_state.get("session_id", "unknown")
     if 'files[]' not in request.files:
         return jsonify({"ok": False, "error": "No files part in the request"})
     
@@ -530,6 +591,7 @@ def api_upload():
             
         _, ext = os.path.splitext(file.filename)
         if ext.lower() not in ALLOWED_EXTENSIONS:
+            logger.warning("[%s] Upload rejected: Invalid file type %s", sid, file.filename)
             return jsonify({"ok": False, "error": f"File type not allowed: {file.filename}. Only .mp4, .mov, .avi allowed."})
             
         filename = secure_filename(file.filename)
@@ -538,10 +600,13 @@ def api_upload():
         try:
             file.save(save_path)
             saved_filenames.append(filename)
+            logger.info("[%s] File uploaded: %s", sid, filename)
         except Exception as e:
+            logger.error("Failed to save %s: %s", filename, e, exc_info=True)
             return jsonify({"ok": False, "error": f"Failed to save {filename}: {str(e)}"})
             
     app_state["selected_files"] = saved_filenames
+    logger.info("Upload complete. Saved %d files.", len(saved_filenames))
     return jsonify({"ok": True, "files": saved_filenames})
 
 @app.route('/api/progress')

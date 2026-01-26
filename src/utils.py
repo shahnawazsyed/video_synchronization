@@ -56,18 +56,25 @@ def ensure_dir(path: str):
     """Create directory if it doesn't exist."""
     os.makedirs(path, exist_ok=True)
 
+import time
+from contextlib import contextmanager
+
 def setup_logger(name: str = "sync", level: int = logging.INFO) -> logging.Logger:
-    """Configure and return a simple logger."""
-    logger = logging.getLogger(name)
-    if logger.handlers:
-        return logger
-    logger.setLevel(level)
-    ch = logging.StreamHandler()
-    ch.setLevel(level)
-    fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-    ch.setFormatter(fmt)
-    logger.addHandler(ch)
-    return logger
+    """
+    Return a logger with the given name.
+    Configuration is now handled centrally in ui.py/main.py.
+    """
+    return logging.getLogger(name)
+
+@contextmanager
+def log_execution_time(logger, operation_name):
+    """Context manager to log the duration of an operation."""
+    start_time = time.time()
+    try:
+        yield
+    finally:
+        elapsed = time.time() - start_time
+        logger.info("Completed [%s] in %.2fs", operation_name, elapsed)
 
 def next_pow2(n: int) -> int:
     p = 1

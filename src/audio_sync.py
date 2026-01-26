@@ -13,13 +13,16 @@ Functions:
 """
 import os
 import warnings
+import logging
 import numpy as np
 from typing import Dict, Tuple, List, Optional
 from scipy.signal import butter, sosfilt
 from scipy.fft import fft, ifft
 from scipy.optimize import least_squares
 
-from .utils import next_pow2, load_audio, detect_outliers
+from .utils import next_pow2, load_audio, detect_outliers, setup_logger, log_execution_time
+
+logger = setup_logger(__name__)
 
 def compute_gcc_phat(sig_a: np.ndarray, sig_b: np.ndarray, fs: int, 
                      max_offset_sec: float = 10.0, 
@@ -95,24 +98,23 @@ def compute_gcc_phat(sig_a: np.ndarray, sig_b: np.ndarray, fs: int,
     confidence = confidence / (confidence + 1.0)
     
     # Verbose mode: show top correlation peaks for debugging
-    verbose = False  # Set to True for diagnostics
-    if verbose:
+    if logger.isEnabledFor(logging.DEBUG):
         # Find top 3 peaks
         mag_sorted_idx = np.argsort(mag)[::-1]
-        print(f"\n  Top 3 correlation peaks:")
+        logger.debug("Top 3 correlation peaks:")
         for i in range(min(3, len(mag_sorted_idx))):
             idx = mag_sorted_idx[i]
             peak_lag = lags[idx]
             peak_offset = peak_lag / float(fs)
             peak_mag = mag[idx]
             marker = "***" if idx == lag_idx else ""
-            print(f"    Peak {i+1}: offset={peak_offset:+.3f}s, mag={peak_mag:.3f} {marker}")
+            logger.debug("    Peak %d: offset=%.3fs, mag=%.3f %s", i+1, peak_offset, peak_mag, marker)
     
     # Quality warnings
     if confidence < 0.3:
-        warnings.warn(f"Low confidence ({confidence:.2f}) - sync may be unreliable")
+        logger.warning("Low confidence (%.2f) - sync may be unreliable", confidence)
     if abs(offset_seconds) > max_offset_sec * 0.9:
-        warnings.warn(f"Offset ({offset_seconds:.2f}s) near search boundary - may be truncated")
+        logger.warning("Offset (%.2fs) near search boundary - may be truncated", offset_seconds)
     return -offset_seconds, confidence
 
 def compute_pairwise_offsets(audio_dir: str, 
@@ -137,20 +139,24 @@ def compute_pairwise_offsets(audio_dir: str,
     if len(wavs) < 2:
         raise ValueError(f"Need at least 2 files for pairwise sync, found {len(wavs)}")
     
-    print(f"Loading {len(wavs)} audio files...")
+    logger.info("Loading %d audio files...", len(wavs))
     # Load all files once
-    signals = {}
-    sample_rates = {}
-    for w in wavs:
-        path = os.path.join(audio_dir, w)
-        sig, sr = load_audio(path)
-        signals[w] = sig
-        sample_rates[w] = sr
+    with log_execution_time(logger, "Load Audio Files"):
+        signals = {}
+        sample_rates = {}
+        for w in wavs:
+            path = os.path.join(audio_dir, w)
+            sig, sr = load_audio(path)
+            signals[w] = sig
+            sample_rates[w] = sr
+    
     # Use most common sample rate as reference
     ref_sr = max(set(sample_rates.values()), key=list(sample_rates.values()).count)
+    
     # Resample all to reference rate
     for w in wavs:
         if sample_rates[w] != ref_sr:
+            logger.debug("Resampling %s to %d Hz", w, ref_sr)
             sig = signals[w]
             sr = sample_rates[w]
             duration = len(sig) / sr
@@ -161,26 +167,33 @@ def compute_pairwise_offsets(audio_dir: str,
                 sig
             ).astype(np.float32)
             sample_rates[w] = ref_sr
-    print(f"Computing {len(wavs) * (len(wavs) - 1) // 2} pairwise offsets...")
+            
+    logger.info("Computing %d pairwise offsets...", len(wavs) * (len(wavs) - 1) // 2)
     pairwise = {}
     skipped = 0
-    for i, file_a in enumerate(wavs):
-        for j, file_b in enumerate(wavs[i+1:], start=i+1):
-            sig_a = signals[file_a]
-            sig_b = signals[file_b]
-            offset, conf = compute_gcc_phat(
-                sig_a, sig_b, ref_sr, 
-                max_offset_sec=max_offset_sec,
-                window_sec=window_sec
-            )
-            if conf >= min_confidence:
-                pairwise[(file_a, file_b)] = (offset, conf)
-                print(f"  {file_a} <-> {file_b}: offset={offset:.3f}s, confidence={conf:.3f}")
-            else:
-                skipped += 1
-                print(f"  {file_a} <-> {file_b}: SKIPPED (confidence={conf:.3f} < {min_confidence})")
+    
+    with log_execution_time(logger, "Pairwise Offset Computation"):
+        for i, file_a in enumerate(wavs):
+            for j, file_b in enumerate(wavs[i+1:], start=i+1):
+                sig_a = signals[file_a]
+                sig_b = signals[file_b]
+                offset, conf = compute_gcc_phat(
+                    sig_a, sig_b, ref_sr, 
+                    max_offset_sec=max_offset_sec,
+                    window_sec=window_sec
+                )
+                if conf >= min_confidence:
+                    pairwise[(file_a, file_b)] = (offset, conf)
+                    if conf < 0.3:
+                         logger.warning("  %s <-> %s: MATCHED BUT LOW FAITH (conf=%.3f)", file_a, file_b, conf)
+                    else:
+                         logger.info("  %s <-> %s: offset=%.3fs, confidence=%.3f", file_a, file_b, offset, conf)
+                else:
+                    skipped += 1
+                    logger.warning("  %s <-> %s: SKIPPED (confidence=%.3f < %.3f)", file_a, file_b, conf, min_confidence)
+                    
     if skipped > 0:
-        print(f"\nSkipped {skipped} pairs due to low confidence")
+        logger.warning("Skipped %d pairs due to low confidence", skipped)
     return pairwise
 
 def optimize_offsets(pairwise: Dict[Tuple[str, str], Tuple[float, float]], 
@@ -219,9 +232,10 @@ def optimize_offsets(pairwise: Dict[Tuple[str, str], Tuple[float, float]],
     offsets_opt = result.x - result.x[0] # Anchor first file to 0 (arbitrary reference frame)
     final_residuals = residuals(result.x)
     rmse = np.sqrt(np.mean(final_residuals**2))
-    print(f"\nOptimization complete:")
-    print(f"  RMSE: {rmse:.4f}s")
-    print(f"  Max residual: {np.max(np.abs(final_residuals)):.4f}s")
+    
+    logger.info("Optimization complete:")
+    logger.info("  RMSE: %.4fs", rmse)
+    logger.debug("  Max residual: %.4fs", np.max(np.abs(final_residuals)))
     return {w: float(offsets_opt[i]) for i, w in enumerate(wavs)}
 
 def estimate_offsets_robust(audio_dir: str, 
@@ -260,17 +274,18 @@ def estimate_offsets_robust(audio_dir: str,
     )
     if not pairwise:
         raise ValueError("No valid pairwise offsets found - all pairs below confidence threshold")
+    
     # Step 2: Optimize for global consistency
-    print("\nOptimizing for global consistency...")
-    optimized = optimize_offsets(pairwise, wavs)
+    logger.info("Optimizing for global consistency...")
+    with log_execution_time(logger, "Offset Optimization"):
+        optimized = optimize_offsets(pairwise, wavs)
+        
     # Step 3: Detect outliers
     outliers = detect_outliers(pairwise, optimized, threshold=outlier_threshold)
+    
     # Step 4: Report results
-    print("\n" + "="*60)
-    print("FINAL SYNCHRONIZED OFFSETS:")
-    print("="*60)
+    logger.info("FINAL SYNCHRONIZED OFFSETS:")
     for w in wavs:
-        print(f"  {w}: {optimized[w]:+.3f}s")
-    print("="*60)
+        logger.info("  %s: %+.3fs", w, optimized[w])
     
     return optimized

@@ -11,6 +11,7 @@ Approach:
 3. Cross-correlate motion timeseries to find offsets
 """
 import os
+import logging
 import itertools
 import cv2
 import numpy as np
@@ -24,6 +25,10 @@ from scipy.ndimage import uniform_filter1d
 from scipy.optimize import least_squares
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Tuple, Optional
+
+from .utils import setup_logger, log_execution_time
+
+logger = setup_logger(__name__)
 
 def extract_motion_energy(video_path: str, 
                           downsample: int = 4,
@@ -151,27 +156,29 @@ def sync_videos_by_motion(video_dir: str,
                           max_offset_sec: float = 20.0,
                           output_dir: Optional[str] = None) -> Dict[str, float]:
     """Main function to synchronize videos by motion."""
-    print("="*60)
-    print("VISUAL (MOTION) SYNCHRONIZATION")
-    print("="*60)
+    """Main function to synchronize videos by motion."""
+    logger.info("Starting Visual (Motion) Synchronization")
     
-    print(f"Step 1: Extracting motion energy from {len(selected_files)} videos...")
+    logger.info("Step 1: Extracting motion energy from %d videos...", len(selected_files))
     motion_signals = {}
     fps_dict = {}
     
     def process_one(fname):
         path = os.path.join(video_dir, fname)
+        # We can also wrap individual extraction in a timer if desired, 
+        # but the parallel execution makes it a bit messy to log duration per file cleanly without spam
         motion, eff_fps = extract_motion_energy(path, step=3)
         motion = smooth_motion_signal(motion, eff_fps)
         return fname, motion, eff_fps
 
-    with ThreadPoolExecutor() as executor:
-        results = list(executor.map(process_one, selected_files))
+    with log_execution_time(logger, "Motion Energy Extraction"):
+        with ThreadPoolExecutor() as executor:
+            results = list(executor.map(process_one, selected_files))
     
     for fname, motion, eff_fps in results:
         motion_signals[fname] = motion
         fps_dict[fname] = eff_fps
-        print(f"  {fname}: {len(motion)} samples @ {eff_fps:.2f} fps")
+        logger.debug("  %s: %d samples @ %.2f fps", fname, len(motion), eff_fps)
     
     target_fps = 10.0
     for fname in selected_files:
@@ -183,18 +190,26 @@ def sync_videos_by_motion(video_dir: str,
     
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
-        visualize_motion_signals(motion_signals, target_fps, 
-                                 os.path.join(output_dir, "motion_signals.png"))
+        try:
+            visualize_motion_signals(motion_signals, target_fps, 
+                                     os.path.join(output_dir, "motion_signals.png"))
+        except Exception:
+            logger.warning("Failed to generate motion plot", exc_info=True)
     
-    print("\nStep 2: Computing pairwise correlations...")
+    logger.info("Step 2: Computing pairwise correlations...")
     pairwise_offsets = {}
     pairs = list(itertools.combinations(selected_files, 2))
-    for f1, f2 in pairs:
-        offset, conf = correlate_motion_signals(motion_signals[f1], motion_signals[f2], target_fps, max_offset_sec)
-        pairwise_offsets[(f1, f2)] = (offset, conf)
-        print(f"  {f1} <-> {f2}: offset={offset:+.2f}s, conf={conf:.3f}")
     
-    print("\nStep 3: Global Optimization...")
+    with log_execution_time(logger, "Pairwise Correlation"):
+        for f1, f2 in pairs:
+            offset, conf = correlate_motion_signals(motion_signals[f1], motion_signals[f2], target_fps, max_offset_sec)
+            pairwise_offsets[(f1, f2)] = (offset, conf)
+            if conf < 0.3:
+                logger.warning("  %s <-> %s: LOW CONFIDENCE (conf=%.3f)", f1, f2, conf)
+            else:
+                logger.info("  %s <-> %s: offset=%+.2fs, conf=%.3f", f1, f2, offset, conf)
+    
+    logger.info("Step 3: Global Optimization...")
     n = len(selected_files)
     file_to_idx = {f: i for i, f in enumerate(selected_files)}
     
@@ -211,10 +226,10 @@ def sync_videos_by_motion(video_dir: str,
     final_offsets = {selected_files[i]: float(offsets_opt[i]) for i in range(n)}
     
     rmse = np.sqrt(np.mean(residuals(result.x)**2))
-    print(f"  RMSE: {rmse:.3f}s")
+    logger.info("  RMSE: %.3fs", rmse)
     
-    print("\nFINAL OFFSETS:")
+    logger.info("FINAL OFFSETS:")
     for f in selected_files:
-        print(f"  {f}: {final_offsets[f]:+.2f}s")
+        logger.info("  %s: %+.2fs", f, final_offsets[f])
     
     return final_offsets

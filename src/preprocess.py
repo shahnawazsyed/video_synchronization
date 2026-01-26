@@ -22,16 +22,23 @@ def extract_audio_from_videos(video_dir: str, audio_dir: str, target_sr: int = 1
         raise RuntimeError("ffmpeg not found on PATH — required to extract audio. Install ffmpeg and retry.")
 
     video_exts = {".mp4", ".mov"}
-    for fname in sorted(os.listdir(video_dir)):
-        if os.path.splitext(fname)[1].lower() not in video_exts:
-            continue
+    files = sorted([f for f in os.listdir(video_dir) if os.path.splitext(f)[1].lower() in video_exts])
+    logger.info("Found %d video files in %s", len(files), video_dir)
+
+    for fname in files:
         in_path = os.path.join(video_dir, fname)
         out_name = os.path.splitext(fname)[0] + ".wav"
         out_path = os.path.join(audio_dir, out_name)
         # ffmpeg: convert to mono, resample
         cmd = f'ffmpeg -y -hide_banner -loglevel error -i {shlex.quote(in_path)} -ac 1 -ar {target_sr} -vn {shlex.quote(out_path)}'
-        logger.info("Extracting audio: %s -> %s", in_path, out_path)
-        subprocess.check_call(shlex.split(cmd))
+        logger.debug("Extracting audio: %s -> %s", in_path, out_path)
+        try:
+            subprocess.check_call(shlex.split(cmd))
+        except subprocess.CalledProcessError:
+            logger.error("Failed to extract audio from %s", in_path, exc_info=True)
+            raise
+
+    logger.info("Audio extraction complete.")
 
 def preprocess_audio(audio_path: str, target_sr: int = 16000):
     """
@@ -43,6 +50,10 @@ def preprocess_audio(audio_path: str, target_sr: int = 16000):
         raise RuntimeError("ffmpeg not found on PATH — required to preprocess audio.")
     tmp = audio_path + ".tmp.wav"
     cmd = f'ffmpeg -y -hide_banner -loglevel error -i {shlex.quote(audio_path)} -ac 1 -ar {target_sr} {shlex.quote(tmp)}'
-    subprocess.check_call(cmd, shell=True)
+    try:
+        subprocess.check_call(cmd, shell=True)
+    except subprocess.CalledProcessError:
+        logger.error("Failed to preprocess audio %s", audio_path, exc_info=True)
+        raise
     os.replace(tmp, audio_path)
     return audio_path, target_sr
