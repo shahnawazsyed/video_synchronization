@@ -40,20 +40,4 @@ def extract_audio_from_videos(video_dir: str, audio_dir: str, target_sr: int = 1
 
     logger.info("Audio extraction complete.")
 
-def preprocess_audio(audio_path: str, target_sr: int = 16000):
-    """
-    Normalize and resample an audio file for synchronization.
-    This function is a small helper to resave a file at target_sr, mono using ffmpeg.
-    Returns path to preprocessed file (overwrites original path).
-    """
-    if not ffmpeg_exists():
-        raise RuntimeError("ffmpeg not found on PATH — required to preprocess audio.")
-    tmp = audio_path + ".tmp.wav"
-    cmd = f'ffmpeg -y -hide_banner -loglevel error -i {shlex.quote(audio_path)} -ac 1 -ar {target_sr} {shlex.quote(tmp)}'
-    try:
-        subprocess.check_call(cmd, shell=True)
-    except subprocess.CalledProcessError:
-        logger.error("Failed to preprocess audio %s", audio_path, exc_info=True)
-        raise
-    os.replace(tmp, audio_path)
-    return audio_path, target_sr
+

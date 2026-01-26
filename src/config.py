@@ -3,13 +3,7 @@ Configuration settings for the video synchronization project.
 """
 import os
 
-# Video files to synchronize
-SELECTED_VIDEOS = [
-    "3_video_b.mov",
-    "3_video_h.mp4",
-    "3_video_r.mp4",
-    "3_video_v.mp4"
-]
+
 
 # Sync method: "visual" (motion-based) or "audio" (GCC-PHAT)
 SYNC_METHOD = "visual"

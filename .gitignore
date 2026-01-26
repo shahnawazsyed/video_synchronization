@@ -10,3 +10,4 @@ grid_search_results.json
 grid_search_params.py
 diagnose_audio.py
 sync_improvement_doc.md
+*.log
