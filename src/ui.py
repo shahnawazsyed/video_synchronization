@@ -49,7 +49,7 @@ h1 { text-align: center; color: #00d9ff; margin-bottom: 8px; font-size: 28px; }
 .btn-success:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,204,102,0.4); }
 .file-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin: 20px 0; }
 .file-item { background: rgba(0,217,255,0.1); padding: 12px 16px; border-radius: 8px; font-size: 14px; }
-.video-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin: 20px 0; }
+.video-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; margin: 20px 0; }
 .video-cell { background: #000; border-radius: 12px; overflow: hidden; aspect-ratio: 16/9; }
 .video-cell video { width: 100%; height: 100%; object-fit: contain; }
 .video-label { text-align: center; font-size: 12px; color: #888; margin-top: 5px; }
@@ -88,10 +88,10 @@ STEP1_HTML = """
         
         <div class="card">
             <h2 style="margin-bottom: 20px;">Step 1: Select Videos</h2>
-            <p style="color: #888; margin-bottom: 20px;">Choose exactly 4 video files</p>
+            <p style="color: #888; margin-bottom: 20px;">Choose 2 or more video files</p>
             
             <div class="select-btn-wrapper">
-                <label class="btn btn-primary" for="fileInput">Select 4 Video Files</label>
+                <label class="btn btn-primary" for="fileInput">Select Video Files</label>
                 <input type="file" id="fileInput" multiple accept="video/*">
             </div>
             
@@ -420,8 +420,8 @@ def step3():
 def api_select():
     data = request.json
     files = data.get('files', [])
-    if len(files) != 4:
-        return jsonify({"ok": False, "error": "Please select exactly 4 files."})
+    if len(files) < 2:
+        return jsonify({"ok": False, "error": "Please select at least 2 files."})
     
     # Validate files exist
     video_dir = config.VIDEO_DIR

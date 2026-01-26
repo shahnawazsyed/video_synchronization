@@ -176,10 +176,15 @@ def show_video_grid(video_dir, title="Video Grid", resize_width=300, grid_size=2
         files, caps = zip(*filtered)
         files = list(files); caps = list(caps); n = len(caps)
     
+    # Calculate grid size dynamically if needed
+    if n > grid_size * grid_size:
+        grid_size = math.ceil(math.sqrt(n))
+    
     grid_shape = (grid_size, grid_size)
     max_videos = grid_size * grid_size
-    if n > max_videos:
-        files = files[:max_videos]; caps = caps[:max_videos]; n = max_videos
+    # No need to truncate unless we strictly want to adhere to a passed grid_size, 
+    # but we just expanded it so it should fit.
+
     
     # Get video properties
     frame_counts = [int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) for cap in caps]
