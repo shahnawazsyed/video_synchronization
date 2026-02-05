@@ -88,6 +88,8 @@ def extract_motion_energy(video_path: str,
             print(f"  {os.path.basename(video_path)}: {frame_idx}/{total_frames}", end="\r")
     
     cap.release()
+    logger.info("  Completed motion extraction for %s: %d frames processed", 
+                os.path.basename(video_path), frame_idx)
     effective_fps = fps / step
     return np.array(motion_energy), effective_fps
 
@@ -164,6 +166,7 @@ def sync_videos_by_motion(video_dir: str,
     fps_dict = {}
     
     def process_one(fname):
+        logger.info("  Processing video: %s", fname)
         path = os.path.join(video_dir, fname)
         # We can also wrap individual extraction in a timer if desired, 
         # but the parallel execution makes it a bit messy to log duration per file cleanly without spam

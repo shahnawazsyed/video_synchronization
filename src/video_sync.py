@@ -223,6 +223,7 @@ def apply_video_offsets(video_dir: str, offsets: Dict[str, float], output_dir: s
             out_path = os.path.join(output_dir, out_fname)
 
             pbar.set_postfix({"file": fname, "offset": f"{off:.3f}s"})
+            logger.info("Processing %s with offset %+.3fs", fname, off)
 
             if not os.path.exists(in_path) or fname not in durations:
                 logger.warning("Skipping %s (missing file or duration)", fname)

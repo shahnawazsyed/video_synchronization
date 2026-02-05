@@ -10,6 +10,7 @@ import webbrowser
 import zipfile
 import logging
 import logging.handlers
+from collections import deque
 from flask import Flask, render_template_string, request, jsonify, send_from_directory, send_file
 
 from .visual_sync import sync_videos_by_motion
@@ -45,11 +46,17 @@ def configure_logging():
     console_handler.setFormatter(formatter)
     console_handler.setLevel(logging.INFO)
     
+    # 3. UI Handler (for real-time display)
+    ui_handler = UILogHandler()
+    ui_handler.setFormatter(formatter)
+    ui_handler.setLevel(logging.INFO)
+    
     # Configure Root Logger
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
     logger.addHandler(file_handler)
     logger.addHandler(console_handler)
+    logger.addHandler(ui_handler)
     
     logging.info("Logging initialized. Writing to %s", log_file)
 
@@ -64,7 +71,22 @@ app_state = {
     "output_dir": config.OUTPUT_DIR,
     "current_step": 1,
     "offsets": {},
+    "logs": deque(maxlen=500),  # Store last 500 log messages
 }
+
+# Custom logging handler to capture logs for UI
+class UILogHandler(logging.Handler):
+    """Custom handler that stores logs in app_state for UI display."""
+    def emit(self, record):
+        try:
+            log_entry = {
+                "timestamp": self.format(record),
+                "level": record.levelname,
+                "message": record.getMessage(),
+            }
+            app_state["logs"].append(log_entry)
+        except Exception:
+            self.handleError(record)
 
 # --- HTML Templates ---
 
@@ -106,6 +128,22 @@ input[type="file"] { display: none; }
 .seek-bar::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 18px; height: 18px; border-radius: 50%; background: linear-gradient(135deg, #00d9ff, #0077ff); cursor: pointer; box-shadow: 0 0 10px rgba(0,217,255,0.5); }
 .seek-bar::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; background: linear-gradient(135deg, #00d9ff, #0077ff); cursor: pointer; border: none; box-shadow: 0 0 10px rgba(0,217,255,0.5); }
 .seek-time { text-align: center; font-size: 12px; color: #888; margin-top: 8px; font-family: monospace; }
+.log-viewer { background: rgba(0,0,0,0.5); border-radius: 10px; padding: 15px; margin: 20px 0; max-height: 300px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 12px; border: 1px solid rgba(255,255,255,0.1); }
+.log-entry { padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.log-entry:last-child { border-bottom: none; }
+.log-timestamp { color: #666; margin-right: 8px; }
+.log-level { font-weight: bold; margin-right: 8px; padding: 2px 6px; border-radius: 3px; font-size: 10px; }
+.log-level-INFO { background: rgba(0,217,255,0.2); color: #00d9ff; }
+.log-level-WARNING { background: rgba(255,193,7,0.2); color: #ffc107; }
+.log-level-ERROR { background: rgba(244,67,54,0.2); color: #f44336; }
+.log-level-DEBUG { background: rgba(156,39,176,0.2); color: #9c27b0; }
+.log-message { color: #ccc; }
+.log-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.log-title { color: #00d9ff; font-weight: 600; font-size: 14px; font-family: 'Segoe UI', Arial, sans-serif; }
+.log-controls { display: flex; gap: 10px; }
+.log-btn { background: rgba(255,255,255,0.1); color: #aaa; border: none; padding: 4px 10px; border-radius: 5px; cursor: pointer; font-size: 11px; transition: all 0.2s; }
+.log-btn:hover { background: rgba(255,255,255,0.2); }
+.log-btn.active { background: rgba(0,217,255,0.3); color: #00d9ff; }
 """
 
 STEP1_HTML = """
@@ -282,6 +320,23 @@ STEP3_HTML = """
                 <div class="progress-container">
                     <div class="progress-bar" id="progressBar">0%</div>
                 </div>
+                
+                <!-- Real-time Log Viewer -->
+                <div style="margin-top: 30px;">
+                    <div class="log-header">
+                        <div class="log-title">🔍 Processing Logs</div>
+                        <div class="log-controls">
+                            <button class="log-btn active" onclick="toggleLogLevel('all')" id="filter-all">All</button>
+                            <button class="log-btn" onclick="toggleLogLevel('INFO')" id="filter-INFO">Info</button>
+                            <button class="log-btn" onclick="toggleLogLevel('WARNING')" id="filter-WARNING">Warnings</button>
+                            <button class="log-btn" onclick="toggleLogLevel('ERROR')" id="filter-ERROR">Errors</button>
+                            <button class="log-btn" onclick="clearLogs()">Clear</button>
+                        </div>
+                    </div>
+                    <div class="log-viewer" id="logViewer">
+                        <div style="color: #666; text-align: center;">Waiting for logs...</div>
+                    </div>
+                </div>
             </div>
             
             <div id="resultSection" class="hidden">
@@ -310,6 +365,9 @@ STEP3_HTML = """
     
     <script>
         let pollInterval;
+        let logPollInterval;
+        let currentLogFilter = 'all';
+        let lastLogCount = 0;
         
         function checkProgress() {
             fetch('/api/progress').then(r => r.json()).then(data => {
@@ -319,8 +377,80 @@ STEP3_HTML = """
                 
                 if (data.progress >= 100) {
                     clearInterval(pollInterval);
+                    clearInterval(logPollInterval);
                     setTimeout(showResults, 1000);
                 }
+            });
+        }
+        
+        function fetchLogs() {
+            fetch('/api/logs').then(r => r.json()).then(data => {
+                if (data.ok && data.logs.length > 0) {
+                    const logViewer = document.getElementById('logViewer');
+                    const shouldScroll = logViewer.scrollTop + logViewer.clientHeight >= logViewer.scrollHeight - 50;
+                    
+                    // Only update if new logs arrived
+                    if (data.logs.length !== lastLogCount) {
+                        lastLogCount = data.logs.length;
+                        displayLogs(data.logs);
+                        
+                        // Auto-scroll to bottom if user was already at bottom
+                        if (shouldScroll) {
+                            logViewer.scrollTop = logViewer.scrollHeight;
+                        }
+                    }
+                }
+            });
+        }
+        
+        function displayLogs(logs) {
+            const logViewer = document.getElementById('logViewer');
+            
+            if (logs.length === 0) {
+                logViewer.innerHTML = '<div style="color: #666; text-align: center;">No logs yet...</div>';
+                return;
+            }
+            
+            const filteredLogs = currentLogFilter === 'all' 
+                ? logs 
+                : logs.filter(log => log.level === currentLogFilter);
+            
+            logViewer.innerHTML = filteredLogs.map(log => {
+                const timestamp = log.timestamp.split(' - ')[0] || '';
+                const timeOnly = timestamp.split(' ')[1] || timestamp;
+                return `
+                    <div class="log-entry">
+                        <span class="log-timestamp">${timeOnly}</span>
+                        <span class="log-level log-level-${log.level}">${log.level}</span>
+                        <span class="log-message">${escapeHtml(log.message)}</span>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function toggleLogLevel(level) {
+            currentLogFilter = level;
+            
+            // Update button states
+            document.querySelectorAll('.log-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.getElementById('filter-' + level).classList.add('active');
+            
+            // Re-fetch and display with new filter
+            fetchLogs();
+        }
+        
+        function clearLogs() {
+            fetch('/api/logs/clear', {method: 'POST'}).then(() => {
+                document.getElementById('logViewer').innerHTML = '<div style="color: #666; text-align: center;">Logs cleared.</div>';
+                lastLogCount = 0;
             });
         }
         
@@ -426,7 +556,10 @@ STEP3_HTML = """
              timeDisplay.innerText = `${format(current)} / ${format(total)}`;
         }
         
+        // Start polling for progress and logs
         pollInterval = setInterval(checkProgress, 1000);
+        logPollInterval = setInterval(fetchLogs, 500);  // Poll logs more frequently
+        fetchLogs();  // Initial fetch
     </script>
 </body>
 </html>
@@ -535,14 +668,20 @@ def api_sync():
                 
             else:
                 # Visual-based sync (default)
-                app_state["sync_progress"] = 10
-                app_state["sync_status"] = "Extracting motion energy..."
-                logger.info("[%s] Starting Visual Sync...", sid)
+                app_state["sync_progress"] = 5
+                app_state["sync_status"] = "Initializing visual synchronization..."
+                logger.info("[%s] Starting Visual Sync with %d videos...", sid, len(files))
                 
                 max_off = 20.0
-                logger.info("[%s] Estimating Motion Offsets (max_offset=%.1fs)...", sid, max_off)
+                logger.info("[%s] Configuration: max_offset=%.1fs", sid, max_off)
+                
+                app_state["sync_progress"] = 10
+                app_state["sync_status"] = "Extracting motion energy from videos..."
                 
                 offsets = sync_videos_by_motion(video_dir, files, max_offset_sec=max_off, output_dir=config.VISUAL_SYNC_OUTPUT_DIR)
+                
+                app_state["sync_progress"] = 55
+                app_state["sync_status"] = "Motion analysis complete!"
             
             app_state["offsets"] = offsets
             logger.info("[%s] Offsets calculated: %s", sid, offsets)
@@ -615,6 +754,19 @@ def api_progress():
         "progress": app_state["sync_progress"],
         "status": app_state["sync_status"]
     })
+
+@app.route('/api/logs')
+def api_logs():
+    """Return recent logs for UI display."""
+    logs = list(app_state["logs"])
+    return jsonify({"ok": True, "logs": logs})
+
+@app.route('/api/logs/clear', methods=['POST'])
+def api_logs_clear():
+    """Clear the log buffer."""
+    app_state["logs"].clear()
+    logger.info("UI logs cleared by user")
+    return jsonify({"ok": True})
 
 @app.route('/api/synced_files')
 def api_synced_files():
