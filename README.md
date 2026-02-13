@@ -28,10 +28,10 @@ pip install -r requirements.txt
    ```bash
    python main.py
    ```
-2. **Access the UI**: Open your browser to `http://127.0.0.1:5000`.
+2. **Access the UI**: Open your browser to `http://127.0.0.1:5050`.
 3. **Workflow**:
-   - **Upload**: Select 2 or more videos. Files are staged in a temporary directory.
-   - **Sync**: Choose between **Visual (Motion)** or **Audio (GCC-PHAT)** synchronization in `src/config.py` (Visual is the default).
+   - **Upload**: Select 2 or more videos (**.mp4, .mov, or .avi**). Files are staged in a temporary directory.
+   - **Sync**: Choose between **Visual (Motion)** or **Audio (GCC-PHAT)** synchronization by setting `SYNC_METHOD` in `src/config.py` **before starting the application**. The synchronization method is not configurable from the UI.
    - **Review**: Use the multi-video previewer with a universal seek bar and audio master toggle to verify alignment.
    - **Export**: Download the synchronized videos as a ZIP.
 
@@ -44,3 +44,10 @@ pip install -r requirements.txt
 ## Configuration
 
 Settings such as `SYNC_METHOD` and directory paths can be modified in `src/config.py`.
+
+## Troubleshooting
+
+- **FFmpeg not found**: If the application fails during sync or audio extraction, ensure FFmpeg is installed and accessible in your system PATH.
+  - **macOS**: `brew install ffmpeg`
+  - **Windows**: Download from [ffmpeg.org](https://ffmpeg.org/download.html) and add the `bin` folder to your System PATH.
+  - **Linux**: `sudo apt install ffmpeg`
