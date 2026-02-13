@@ -30,5 +30,3 @@ if __name__ == "__main__":
     configure_logging()
     cleanup_temp()
     run_app()
-
-#TODO: track changes, ask claude/gemini whatever to cross reference system architecture with final thing

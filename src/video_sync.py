@@ -56,20 +56,44 @@ def _get_video_duration(video_path):
         raise RuntimeError(f"Failed to get duration for {video_path}: {e}")
 
 
-def _delay_stream_copy(input_path, output_path, offset):
+def _has_audio_stream(video_path):
+    """Check if video has an audio stream."""
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "a",
+        "-show_entries", "stream=index",
+        "-of", "csv=p=0",
+        video_path
+    ]
+    try:
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        # If output contains anything, an audio stream exists
+        return len(result.stdout.strip()) > 0
+    except Exception:
+        return False
+
+
+def _delay_stream_copy(input_path, output_path, offset, has_audio=True):
     """
     Positive offset: delay entire file using -itsoffset.
     This preserves both audio and video PTS if ffmpeg can stream copy.
     """
-    return [
+    cmd = [
         "ffmpeg", "-y",
         "-itsoffset", str(offset),
         "-i", input_path,
         "-i", input_path,
-        "-map", "0:v", "-map", "0:a",
+        "-map", "0:v"
+    ]
+    
+    if has_audio:
+        cmd.extend(["-map", "0:a"])
+    
+    cmd.extend([
         "-c", "copy",
         output_path
-    ]
+    ])
+    return cmd
 
 
 def _trim_stream_copy(input_path, output_path, trim):
@@ -83,21 +107,10 @@ def _trim_stream_copy(input_path, output_path, trim):
     ]
 
 
-def _reencode_delay(input_path, output_path, offset, end_pad=0):
+def _reencode_delay(input_path, output_path, offset, end_pad=0, has_audio=True):
     """
     Fallback method: re-encode and shift using tpad filter.
     This inserts actual black frames at the start and/or end, ensuring OpenCV respects the delay.
-    
-    Parameters
-    ----------
-    input_path : str
-        Path to input video
-    output_path : str
-        Path to output video
-    offset : float
-        Start padding duration in seconds (black frames at the beginning)
-    end_pad : float
-        End padding duration in seconds (black frames at the end)
     """
     ms = int(offset * 1000)
     
@@ -114,42 +127,66 @@ def _reencode_delay(input_path, output_path, offset, end_pad=0):
         tpad_str = "[0:v]copy[v]"
     
     # Audio delay for start, and apad for end
-    audio_filters = []
-    if offset > 0:
-        audio_filters.append(f"adelay={ms}|{ms}")
-    if end_pad > 0:
-        # Convert to milliseconds for apad
-        end_ms = int(end_pad * 1000)
-        audio_filters.append(f"apad=pad_dur={end_ms}ms")
+    filter_complex = f"{tpad_str}"
     
-    if audio_filters:
-        audio_str = f"[0:a]{','.join(audio_filters)}[a]"
-    else:
-        audio_str = "[0:a]copy[a]"
+    if has_audio:
+        audio_filters = []
+        if offset > 0:
+            audio_filters.append(f"adelay={ms}|{ms}")
+        if end_pad > 0:
+            # Convert to milliseconds for apad
+            end_ms = int(end_pad * 1000)
+            audio_filters.append(f"apad=pad_dur={end_ms}ms")
+        
+        if audio_filters:
+            audio_str = f"[0:a]{','.join(audio_filters)}[a]"
+            filter_complex += f";{audio_str}"
+        else:
+            # Pass through audio if no delay needed but audio exists
+            filter_complex += ";[0:a]copy[a]"
     
-    filter_complex = f"{tpad_str};{audio_str}"
-    
-    return [
+    cmd = [
         "ffmpeg", "-y",
         "-i", input_path,
         "-filter_complex", filter_complex,
-        "-map", "[v]", "-map", "[a]",
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
-        "-c:a", "aac", "-b:a", "128k",
-        output_path
+        "-map", "[v]"
     ]
+    
+    if has_audio:
+        # If we modified audio, map [a], else if we used copy in filter, map [a]
+        # BUT wait, [0:a]copy[a] works.
+        # If we didn't add audio filter part because of no audio_filters (e.g. 0 offset, 0 pad),
+        # we still need to map audio if it exists.
+        # Logic adjustment above: if has_audio, we ALWAYS ensure [a] is created or mapped?
+        # Simpler: if has_audio, we map [a].
+        cmd.extend(["-map", "[a]"])
+        
+    cmd.extend([
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23"
+    ])
+    
+    if has_audio:
+        cmd.extend(["-c:a", "aac", "-b:a", "128k"])
+        
+    cmd.append(output_path)
+    
+    return cmd
 
 
-def _reencode_trim(input_path, output_path, trim):
+def _reencode_trim(input_path, output_path, trim, has_audio=True):
     """Fallback for negative offset: trim then re-encode."""
-    return [
+    cmd = [
         "ffmpeg", "-y",
         "-ss", str(trim),
         "-i", input_path,
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
-        "-c:a", "aac", "-b:a", "128k",
-        output_path
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23"
     ]
+    
+    if has_audio:
+        cmd.extend(["-c:a", "aac", "-b:a", "128k"])
+    
+    cmd.append(output_path)
+    return cmd
 
 
 def apply_video_offsets(video_dir: str, offsets: Dict[str, float], output_dir: str, verbose: bool = True):
@@ -185,6 +222,7 @@ def apply_video_offsets(video_dir: str, offsets: Dict[str, float], output_dir: s
     
     durations = {}
     final_durations = {}
+    audio_presence = {}
     
     for fname in offsets.keys():
         in_path = os.path.join(video_dir, fname)
@@ -196,12 +234,18 @@ def apply_video_offsets(video_dir: str, offsets: Dict[str, float], output_dir: s
             duration = _get_video_duration(in_path)
             durations[fname] = duration
             
+            # Check for audio stream
+            has_audio = _has_audio_stream(in_path)
+            audio_presence[fname] = has_audio
+            if not has_audio:
+                logger.debug("  %s detected as silent (no audio stream)", fname)
+            
             # Final duration = original duration + offset (if positive) - trim (if negative)
             final_durations[fname] = duration + offsets[fname]
             
             logger.debug("  %s: %.2fs -> %.2fs", fname, duration, final_durations[fname])
         except Exception as e:
-            logger.error("Error getting duration for %s: %s", fname, e)
+            logger.error("Error getting duration/info for %s: %s", fname, e)
             continue
     
     # Find the maximum final duration
@@ -229,24 +273,30 @@ def apply_video_offsets(video_dir: str, offsets: Dict[str, float], output_dir: s
                 logger.warning("Skipping %s (missing file or duration)", fname)
                 continue
             
+            has_audio = audio_presence.get(fname, True)
+            
             # Calculate end padding needed
-            # end_pad = max_duration - (original_duration + offset)
             end_pad = max(0, max_duration - final_durations[fname])
 
             # tiny offset and no end padding → just copy
             if abs(off) < EPS and end_pad < EPS:
                 try:
-                    _run(["ffmpeg", "-y", "-i", in_path, "-c", "copy", out_path])
+                    # Explicit simple copy
+                    cmd = ["ffmpeg", "-y", "-i", in_path]
+                    if not has_audio:
+                        # If no audio, make sure we ignore audio mapping if implicit
+                        # Actually -c copy works fine usually.
+                        pass
+                    cmd.extend(["-c", "copy", out_path])
+                    _run(cmd)
                     continue
                 except Exception:
                     pass  # try full path below
 
             # positive offset = delay (may also need end padding)
-            # MUST re-encode to burn in black frames (tpad) so OpenCV respects the delay
             if off > 0:
                 try:
-                    # Re-encode with start padding and end padding
-                    _run(_reencode_delay(in_path, out_path, off, end_pad))
+                    _run(_reencode_delay(in_path, out_path, off, end_pad, has_audio))
                 except Exception as e:
                     logger.error("Reencode delay failed for %s: %s", fname, e, exc_info=True)
 
@@ -258,43 +308,56 @@ def apply_video_offsets(video_dir: str, offsets: Dict[str, float], output_dir: s
                 if end_pad > EPS:
                     try:
                         # We need to trim AND pad the end
-                        # Use a filter that trims then pads
-                        trim_ms = int(trim * 1000)
-                        end_ms = int(end_pad * 1000)
-                        
                         cmd = [
                             "ffmpeg", "-y",
                             "-ss", str(trim),  # Trim from start
                             "-i", in_path,
-                            "-filter_complex",
-                            f"[0:v]tpad=stop_duration={end_pad}:color=black[v];"
-                            f"[0:a]apad=pad_dur={end_ms}ms[a]",
-                            "-map", "[v]", "-map", "[a]",
-                            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
-                            "-c:a", "aac", "-b:a", "128k",
-                            out_path
                         ]
+                        
+                        tpad_str = f"[0:v]tpad=stop_duration={end_pad}:color=black[v]"
+                        filter_complex = f"{tpad_str}"
+                        
+                        if has_audio:
+                            end_ms = int(end_pad * 1000)
+                            filter_complex += f";[0:a]apad=pad_dur={end_ms}ms[a]"
+                        
+                        cmd.extend(["-filter_complex", filter_complex])
+                        cmd.extend(["-map", "[v]"])
+                        if has_audio:
+                            cmd.extend(["-map", "[a]"])
+                            
+                        cmd.extend([
+                            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23"
+                        ])
+                        
+                        if has_audio:
+                            cmd.extend(["-c:a", "aac", "-b:a", "128k"])
+                        
+                        cmd.append(out_path)
+                        
                         _run(cmd)
                     except Exception as e:
                         logger.error("Trim + end pad failed for %s: %s", fname, e, exc_info=True)
                 else:
                     # Just trim, no end padding needed
                     try:
-                        _run(_trim_stream_copy(in_path, out_path, trim))
+                        cmd = _trim_stream_copy(in_path, out_path, trim)
+                        # _trim_stream_copy uses -c copy which might include audio mapping implicitly?
+                        # It doesn't use explicit map.
+                        _run(cmd)
                         continue
                     except Exception as e:
                         logger.warning("Stream-copy trim failed for %s: %s. Retrying with re-encode.", fname, e)
                         try:
-                            _run(_reencode_trim(in_path, out_path, trim))
+                            _run(_reencode_trim(in_path, out_path, trim, has_audio))
                         except Exception as e2:
                             logger.error("Reencode trim also failed for %s: %s", fname, e2, exc_info=True)
             
             # zero offset but needs end padding
             else:
                 try:
-                    _run(_reencode_delay(in_path, out_path, 0, end_pad))
+                    _run(_reencode_delay(in_path, out_path, 0, end_pad, has_audio))
                 except Exception as e:
                     logger.error("End padding failed for %s: %s", fname, e, exc_info=True)
     
     return True
-

@@ -4,6 +4,3 @@ numpy
 scipy
 matplotlib
 tqdm
-pandas
-seaborn
-notebook

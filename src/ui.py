@@ -346,6 +346,7 @@ STEP3_HTML = """
                 
                 <div class="btn-row">
                      <button id="playPauseBtn" class="btn btn-primary" onclick="togglePlayPause()">⏸ Pause</button>
+                     <button id="muteToggleBtn" class="btn btn-secondary" onclick="toggleMute()">Unmute All</button>
                      <button class="btn btn-secondary" onclick="restartAllResult()">↺ Restart</button>
                 </div>
 
@@ -504,6 +505,24 @@ STEP3_HTML = """
                  pauseAllResult();
             } else {
                  playAllResult();
+            }
+        }
+        
+        function toggleMute() {
+            const videos = document.querySelectorAll('.result-video');
+            if (videos.length === 0) return;
+            
+            const btn = document.getElementById('muteToggleBtn');
+            const isMuted = videos[0].muted;
+            
+            videos.forEach(v => v.muted = !isMuted);
+            
+            if (!isMuted) {
+                btn.innerHTML = "🔊 Unmute All";
+                btn.classList.replace('btn-primary', 'btn-secondary');
+            } else {
+                btn.innerHTML = "🔇 Mute All";
+                btn.classList.replace('btn-secondary', 'btn-primary');
             }
         }
         
@@ -781,7 +800,7 @@ def api_synced_files():
                 break
     return jsonify({"ok": True, "files": result})
 
-@app.route('/api/download')
+@app.route('/api/download_all')
 def api_download():
     """Create and send a ZIP file of all synced videos."""
     from io import BytesIO
