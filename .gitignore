@@ -8,3 +8,8 @@ __pycache__/
 *.csv
 /raw
 /eval/.ipynb_checkpoints
+/evaluation/originals/
+/evaluation/synthetic/
+/evaluation/results/
+/evaluation/metrics/
+/evaluation/plots/
