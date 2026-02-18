@@ -85,7 +85,7 @@ def extract_motion_energy(video_path: str,
         frame_idx += 1
         
         if frame_idx % 300 == 0:
-            print(f"  {os.path.basename(video_path)}: {frame_idx}/{total_frames}", end="\r")
+            logger.debug("%s: %d/%d frames", os.path.basename(video_path), frame_idx, total_frames)
     
     cap.release()
     logger.info("  Completed motion extraction for %s: %d frames processed", 
@@ -157,7 +157,6 @@ def sync_videos_by_motion(video_dir: str,
                           selected_files: List[str],
                           max_offset_sec: float = 20.0,
                           output_dir: Optional[str] = None) -> Dict[str, float]:
-    """Main function to synchronize videos by motion."""
     """Main function to synchronize videos by motion."""
     logger.info("Starting Visual (Motion) Synchronization")
     

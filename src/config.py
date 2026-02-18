@@ -2,9 +2,6 @@
 Configuration settings for the video synchronization project.
 """
 import os
-
-
-
 import tempfile
 
 # Sync method: "visual" (motion-based) or "audio" (GCC-PHAT)

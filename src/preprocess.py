@@ -6,7 +6,6 @@ Extracts and preprocesses audio from input video files.
 import os
 import shlex
 import subprocess
-from typing import Optional
 from .utils import ensure_dir, setup_logger, ffmpeg_exists
 
 logger = setup_logger(__name__)
@@ -39,5 +38,3 @@ def extract_audio_from_videos(video_dir: str, audio_dir: str, target_sr: int = 1
             raise
 
     logger.info("Audio extraction complete.")
-
-

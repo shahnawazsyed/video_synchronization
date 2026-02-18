@@ -181,6 +181,27 @@ def compute_metrics(
 
     metrics["efficiency"] = efficiency
 
+    # ── 6. Resource usage ─────────────────────────────────────────────
+    resource_usage = {}
+
+    if "peak_cpu_percent" in df.columns and "peak_memory_mb" in df.columns:
+        for method in ("audio", "visual"):
+            mdf = df[df["method_type"] == method]
+            if mdf.empty:
+                continue
+            cpus = mdf["peak_cpu_percent"].values.astype(float)
+            mems = mdf["peak_memory_mb"].values.astype(float)
+            resource_usage[method] = {
+                "mean_peak_cpu_percent": _safe_float(np.mean(cpus)),
+                "max_peak_cpu_percent": _safe_float(np.max(cpus)),
+                "mean_peak_memory_mb": _safe_float(np.mean(mems)),
+                "max_peak_memory_mb": _safe_float(np.max(mems)),
+            }
+    else:
+        resource_usage["note"] = "No resource usage data in results (re-run run_batch to collect)"
+
+    metrics["resource_usage"] = resource_usage
+
     # ── 5. Grouped metrics (sensitivity tags) ────────────────────────
     grouped = {}
     tag_columns = ["video_length_sec", "motion_level", "audio_energy_level"]
@@ -279,6 +300,18 @@ def _print_summary(metrics: dict):
             print(f"    Mean runtime: {vals['mean_runtime_seconds']:.2f}s")
             if "runtime_per_video_minute" in vals:
                 print(f"    Per video-min: {vals['runtime_per_video_minute']:.2f}s")
+
+    # Resource usage
+    if "resource_usage" in metrics:
+        ru = metrics["resource_usage"]
+        if "note" not in ru:
+            print("\n── Resource Usage ─────────────────────────────────────")
+            for method, vals in ru.items():
+                print(f"  [{method.upper()}]")
+                print(f"    Mean peak CPU:    {vals['mean_peak_cpu_percent']:.1f}%")
+                print(f"    Max  peak CPU:    {vals['max_peak_cpu_percent']:.1f}%")
+                print(f"    Mean peak memory: {vals['mean_peak_memory_mb']:.1f} MB")
+                print(f"    Max  peak memory: {vals['max_peak_memory_mb']:.1f} MB")
 
     print("\n" + "=" * 70 + "\n")
 

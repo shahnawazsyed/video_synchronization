@@ -5,11 +5,15 @@ Helper utilities for file handling, plotting, and logging.
 """
 
 import os
+import time
 import logging
+from contextlib import contextmanager
+
 import numpy as np
 import subprocess
 from scipy.io import wavfile
 from typing import Dict, List, Tuple
+
 
 def ffmpeg_exists() -> bool:
     try:
@@ -18,46 +22,50 @@ def ffmpeg_exists() -> bool:
     except FileNotFoundError:
         return False
 
-def detect_outliers(pairwise: Dict[Tuple[str, str], Tuple[float, float]], 
-                   optimized: Dict[str, float], 
+
+logger = logging.getLogger(__name__)
+
+
+def detect_outliers(pairwise: Dict[Tuple[str, str], Tuple[float, float]],
+                   optimized: Dict[str, float],
                    threshold: float = 0.5) -> List[Tuple[str, str, float, float, float]]:
     """
     Find pairwise estimates that disagree strongly with optimized solution.
-    
+
     Args:
         pairwise: Dict of (fileA, fileB) -> (offset, confidence)
         optimized: Dict of filename -> optimized offset
         threshold: Flag pairs with error > this many seconds (default 0.5s)
-    
+
     Returns:
         List of (fileA, fileB, measured_offset, expected_offset, error) tuples
     """
     outliers = []
-    print(f"\nChecking for outliers (threshold={threshold}s)...")
-    
+    logger.info("Checking for outliers (threshold=%.1fs) ...", threshold)
+
     for (file_a, file_b), (d_measured, conf) in pairwise.items():
         d_expected = optimized[file_b] - optimized[file_a]
         error = abs(d_measured - d_expected)
-        
+
         if error > threshold:
             outliers.append((file_a, file_b, d_measured, d_expected, error))
-            print(f"  ⚠️  {file_a} <-> {file_b}:")
-            print(f"      measured={d_measured:.3f}s, expected={d_expected:.3f}s, "
-                  f"error={error:.3f}s, conf={conf:.3f}")
-    
+            logger.warning(
+                "  Outlier: %s <-> %s: measured=%.3fs, expected=%.3fs, error=%.3fs, conf=%.3f",
+                file_a, file_b, d_measured, d_expected, error, conf,
+            )
+
     if not outliers:
-        print("  ✓ No outliers detected")
+        logger.info("  No outliers detected")
     else:
-        print(f"\n  Found {len(outliers)} outlier pair(s)")
-    
+        logger.info("  Found %d outlier pair(s)", len(outliers))
+
     return outliers
+
 
 def ensure_dir(path: str):
     """Create directory if it doesn't exist."""
     os.makedirs(path, exist_ok=True)
 
-import time
-from contextlib import contextmanager
 
 def setup_logger(name: str = "sync", level: int = logging.INFO) -> logging.Logger:
     """
@@ -65,6 +73,7 @@ def setup_logger(name: str = "sync", level: int = logging.INFO) -> logging.Logge
     Configuration is now handled centrally in ui.py/main.py.
     """
     return logging.getLogger(name)
+
 
 @contextmanager
 def log_execution_time(logger, operation_name):
@@ -76,11 +85,13 @@ def log_execution_time(logger, operation_name):
         elapsed = time.time() - start_time
         logger.info("Completed [%s] in %.2fs", operation_name, elapsed)
 
+
 def next_pow2(n: int) -> int:
     p = 1
     while p < n:
         p <<= 1
     return p
+
 
 def load_audio(path: str) -> Tuple[np.ndarray, int]:
     sr, data = wavfile.read(path)
@@ -93,5 +104,3 @@ def load_audio(path: str) -> Tuple[np.ndarray, int]:
     if data.ndim > 1:
         data = data.mean(axis=1)
     return data, sr
-
-

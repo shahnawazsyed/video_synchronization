@@ -96,19 +96,19 @@ evaluation/
    ```bash
    python -m evaluation.run_batch
    ```
-   This produces `evaluation/results/results.csv` with **48 rows** (24 cases x 2 methods), containing estimated offsets, absolute errors, confidence scores, and runtimes.
+   This produces `evaluation/results/results.csv` with **48 rows** (24 cases x 2 methods), containing estimated offsets, absolute errors, confidence scores, runtimes, and peak CPU/memory usage.
 
 4. **Compute metrics** — aggregates accuracy, confidence validation, and efficiency statistics:
    ```bash
    python -m evaluation.compute_metrics
    ```
-   This produces `evaluation/metrics/metrics_summary.json` with four metric categories: `accuracy`, `cross_method_agreement`, `confidence_validation`, and `efficiency`. A human-readable summary table is also printed to the console.
+   This produces `evaluation/metrics/metrics_summary.json` with metric categories: `accuracy`, `cross_method_agreement`, `confidence_validation`, `efficiency`, and `resource_usage`. A human-readable summary table is also printed to the console.
 
 5. **Generate plots** — produces publication-ready visualizations:
    ```bash
    python -m evaluation.visualize_results
    ```
-   This saves **4 PNG plots** to `evaluation/plots/`:
+   This saves **8 plot types** to `evaluation/plots/`:
 
    | Plot | Description |
    |------|-------------|
@@ -116,6 +116,10 @@ evaluation/
    | `confidence_vs_error.png` | Scatter plot with regression line |
    | `audio_video_diff_histogram.png` | Distribution of audio-visual estimate differences |
    | `runtime_comparison.png` | Mean runtime by method |
+   | `error_distribution_boxplot.png` | Boxplot of error distribution by method and offset |
+   | `resource_usage.png` | Peak CPU and memory usage by method |
+   | `before_after/*.png` | Per-case motion signal overlay before & after alignment |
+   | `timelines/*.png` | Per-case timeline bars with offset arrows (pad/trim) |
 
 ## Troubleshooting
 

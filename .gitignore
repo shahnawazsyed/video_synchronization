@@ -11,3 +11,4 @@ __pycache__/
 /evaluation/results/
 /evaluation/metrics/
 /evaluation/plots/
+/evaluation/diagnostics/
