@@ -4,7 +4,7 @@ A Flask-based tool for aligning multiple video tracks using visual motion detect
 
 ## Prerequisites
 
-- **Python 3.9+**
+- **Python 3.11+** (required by `scipy` and `pandas`; developed/tested on Python 3.12)
 - **FFmpeg**: Required for audio extraction and video manipulation. Ensure it's in your system PATH.
 
 ## Installation
