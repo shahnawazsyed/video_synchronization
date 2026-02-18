@@ -45,6 +45,65 @@ pip install -r requirements.txt
 
 Settings such as `SYNC_METHOD` and directory paths can be modified in `src/config.py`.
 
+## Evaluation Suite
+
+A fully script-driven, reproducible pipeline for assessing the accuracy, confidence reliability, and efficiency of both synchronization methods.
+
+### Directory Structure
+
+```
+evaluation/
+├── originals/          # Place your 4 source videos here
+├── synthetic/          # Generated offset-shifted videos
+├── metadata/
+│   └── synthetic_metadata.csv
+├── results/
+│   └── results.csv
+├── metrics/
+│   └── metrics_summary.json
+├── plots/              # Publication-ready PNG plots
+│
+├── offset_generation.py
+├── run_batch.py
+├── compute_metrics.py
+└── visualize_results.py
+```
+
+### Running the Evaluation
+
+1. **Place original videos** (`.mp4`, `.mov`, or `.avi`) in `evaluation/originals/`.
+
+2. **Generate synthetic dataset** — creates offset-shifted copies of each video at six offsets (-1000, -500, -100, +100, +500, +1000 ms) along with a metadata CSV:
+   ```bash
+   python -m evaluation.offset_generation
+   ```
+   This produces **24 files** in `evaluation/synthetic/` (4 videos x 6 offsets) and a 24-row `evaluation/metadata/synthetic_metadata.csv`.
+
+3. **Run batch synchronization** — runs audio (GCC-PHAT) and visual (motion) sync on every synthetic case:
+   ```bash
+   python -m evaluation.run_batch
+   ```
+   This produces `evaluation/results/results.csv` with **48 rows** (24 cases x 2 methods), containing estimated offsets, absolute errors, confidence scores, and runtimes.
+
+4. **Compute metrics** — aggregates accuracy, confidence validation, and efficiency statistics:
+   ```bash
+   python -m evaluation.compute_metrics
+   ```
+   This produces `evaluation/metrics/metrics_summary.json` with four metric categories: `accuracy`, `cross_method_agreement`, `confidence_validation`, and `efficiency`. A human-readable summary table is also printed to the console.
+
+5. **Generate plots** — produces publication-ready visualizations:
+   ```bash
+   python -m evaluation.visualize_results
+   ```
+   This saves **4 PNG plots** to `evaluation/plots/`:
+
+   | Plot | Description |
+   |------|-------------|
+   | `error_vs_offset.png` | MAE per offset magnitude (audio vs visual) |
+   | `confidence_vs_error.png` | Scatter plot with regression line |
+   | `audio_video_diff_histogram.png` | Distribution of audio-visual estimate differences |
+   | `runtime_comparison.png` | Mean runtime by method |
+
 ## Troubleshooting
 
 - **FFmpeg not found**: If the application fails during sync or audio extraction, ensure FFmpeg is installed and accessible in your system PATH.
