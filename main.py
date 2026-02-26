@@ -25,6 +25,7 @@ def cleanup_temp():
     os.makedirs(config.OUTPUT_DIR, exist_ok=True)
     os.makedirs(config.AUDIO_DIR, exist_ok=True)
     os.makedirs(config.VISUAL_SYNC_OUTPUT_DIR, exist_ok=True)
+    os.makedirs(config.RESULTS_DIR, exist_ok=True)
 
 if __name__ == "__main__":
     configure_logging()

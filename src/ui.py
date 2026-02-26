@@ -15,6 +15,7 @@ from flask import Flask, render_template_string, request, jsonify, send_from_dir
 
 from .visual_sync import sync_videos_by_motion
 from .video_sync import apply_video_offsets
+from .sync_indicators import generate_sync_indicators
 from . import config
 
 # Clean up any existing handlers to avoid duplication
@@ -705,7 +706,19 @@ def api_sync():
             app_state["offsets"] = offsets
             logger.info("[%s] Offsets calculated: %s", sid, offsets)
             
-            app_state["sync_progress"] = 60
+            # Generate visual sync indicators (bounding box images)
+            app_state["sync_progress"] = 58
+            app_state["sync_status"] = "Generating visual sync indicators..."
+            try:
+                indicator_files = generate_sync_indicators(
+                    video_dir, files, offsets, config.RESULTS_DIR
+                )
+                logger.info("[%s] Generated %d sync indicator images in %s",
+                            sid, len(indicator_files), config.RESULTS_DIR)
+            except Exception as e:
+                logger.warning("[%s] Sync indicator generation failed (non-fatal): %s", sid, e, exc_info=True)
+            
+            app_state["sync_progress"] = 65
             app_state["sync_status"] = "Applying offsets to videos..."
             
             apply_video_offsets(video_dir, offsets, output_dir)

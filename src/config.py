@@ -10,14 +10,21 @@ SYNC_METHOD = "visual"
 # Use system temp directory
 TEMP_BASE = os.path.join(tempfile.gettempdir(), "video_synchronization")
 
+# Project root (where main.py lives)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # Directories
 VIDEO_DIR = os.path.join(TEMP_BASE, "raw")
 OUTPUT_DIR = os.path.join(TEMP_BASE, "synced")
 AUDIO_DIR = os.path.join(TEMP_BASE, "audio")
 VISUAL_SYNC_OUTPUT_DIR = os.path.join(TEMP_BASE, "visual_sync_debug")
 
+# Results directory for sync indicator images (persists across sessions)
+RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
+
 # Ensure directories exist
 os.makedirs(VIDEO_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(AUDIO_DIR, exist_ok=True)
 os.makedirs(VISUAL_SYNC_OUTPUT_DIR, exist_ok=True)
+os.makedirs(RESULTS_DIR, exist_ok=True)
