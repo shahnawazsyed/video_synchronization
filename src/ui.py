@@ -4,7 +4,6 @@ ui.py
 Flask-based multi-step wizard UI for video synchronization.
 """
 import os
-import secrets
 import tempfile
 import threading
 import webbrowser
@@ -12,8 +11,7 @@ import zipfile
 import logging
 import logging.handlers
 from collections import deque
-from functools import wraps
-from flask import Flask, render_template_string, request, jsonify, send_from_directory, send_file, session, redirect, url_for
+from flask import Flask, render_template_string, request, jsonify, send_from_directory, send_file
 
 from .visual_sync import sync_videos_by_motion
 from .video_sync import apply_video_offsets
@@ -63,9 +61,6 @@ def configure_logging():
     logging.info("Logging initialized. Writing to %s", log_file)
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
-app.config['SESSION_COOKIE_HTTPONLY'] = True
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 logger = logging.getLogger(__name__)
 
 # Global state
@@ -589,85 +584,11 @@ STEP3_HTML = """
 </html>
 """
 
-# --- Authentication ---
-
-LOGIN_HTML = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Login - Video Synchronization</title>
-    <style>""" + BASE_CSS + """
-    .login-card { max-width: 420px; margin: 80px auto; }
-    .login-input { width: 100%; padding: 14px 18px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.08); color: #eee; font-size: 15px; outline: none; transition: border-color 0.3s; }
-    .login-input:focus { border-color: #00d9ff; }
-    .login-input::placeholder { color: #666; }
-    .error-msg { background: rgba(244,67,54,0.15); color: #f44336; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; font-size: 14px; border: 1px solid rgba(244,67,54,0.3); }
-    .login-form { display: flex; flex-direction: column; gap: 18px; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="login-card card">
-            <h1 style="font-size: 24px; margin-bottom: 6px;">Video Synchronization</h1>
-            <p class="subtitle" style="margin-bottom: 30px;">Enter access token to continue</p>
-            {% if error %}
-            <div class="error-msg">{{ error }}</div>
-            {% endif %}
-            <form method="POST" class="login-form">
-                <input type="password" name="token" class="login-input" placeholder="Access Token" autofocus required>
-                <button type="submit" class="btn btn-primary" style="width: 100%;">Login</button>
-            </form>
-        </div>
-    </div>
-</body>
-</html>
-"""
-
-def require_auth(f):
-    """Decorator: redirect to /login if VIDEO_SYNC_TOKEN is set and user is not authenticated."""
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        token = os.environ.get('VIDEO_SYNC_TOKEN')
-        if not token:
-            # No token configured → dev mode, allow access
-            return f(*args, **kwargs)
-        if session.get('authenticated'):
-            return f(*args, **kwargs)
-        # For API/video routes return 401 JSON instead of redirect
-        if request.path.startswith('/api/') or request.path.startswith('/video/'):
-            return jsonify({"ok": False, "error": "Authentication required"}), 401
-        return redirect(url_for('login', next=request.url))
-    return decorated
-
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    token = os.environ.get('VIDEO_SYNC_TOKEN')
-    if not token:
-        return redirect('/')
-    if request.method == 'POST':
-        submitted = request.form.get('token', '')
-        if secrets.compare_digest(submitted, token):
-            session['authenticated'] = True
-            logger.info("Successful login from %s", request.remote_addr)
-            next_url = request.args.get('next', '/')
-            return redirect(next_url)
-        else:
-            logger.warning("Failed login attempt from %s", request.remote_addr)
-            return render_template_string(LOGIN_HTML, error="Invalid token. Please try again.")
-    return render_template_string(LOGIN_HTML, error=None)
-
-@app.route('/logout')
-def logout():
-    session.pop('authenticated', None)
-    logger.info("Logout from %s", request.remote_addr)
-    return redirect(url_for('login'))
-
 # --- Routes ---
 
 import uuid
 
 @app.route('/')
-@require_auth
 def step1():
     app_state["current_step"] = 1
     app_state["selected_files"] = []
@@ -676,7 +597,6 @@ def step1():
     return STEP1_HTML
 
 @app.route('/step2')
-@require_auth
 def step2():
     if not app_state["selected_files"]:
         return '<script>window.location.href="/";</script>'
@@ -685,7 +605,6 @@ def step2():
     return render_template_string(STEP2_HTML, files=app_state["selected_files"])
 
 @app.route('/step3')
-@require_auth
 def step3():
     if not app_state["selected_files"]:
         return '<script>window.location.href="/";</script>'
@@ -693,7 +612,6 @@ def step3():
     return STEP3_HTML
 
 @app.route('/api/select', methods=['POST'])
-@require_auth
 def api_select():
     sid = app_state.get("session_id", "unknown")
     data = request.json
@@ -717,7 +635,6 @@ from . import preprocess
 from . import audio_sync
 
 @app.route('/api/sync')
-@require_auth
 def api_sync():
     sid = app_state.get("session_id", "unknown")
     if not app_state["selected_files"]:
@@ -808,7 +725,6 @@ def api_sync():
     return jsonify({"ok": True})
 
 @app.route('/api/upload', methods=['POST'])
-@require_auth
 def api_upload():
     sid = app_state.get("session_id", "unknown")
     if 'files[]' not in request.files:
@@ -852,7 +768,6 @@ def api_upload():
     return jsonify({"ok": True, "files": saved_filenames})
 
 @app.route('/api/progress')
-@require_auth
 def api_progress():
     return jsonify({
         "progress": app_state["sync_progress"],
@@ -860,14 +775,12 @@ def api_progress():
     })
 
 @app.route('/api/logs')
-@require_auth
 def api_logs():
     """Return recent logs for UI display."""
     logs = list(app_state["logs"])
     return jsonify({"ok": True, "logs": logs})
 
 @app.route('/api/logs/clear', methods=['POST'])
-@require_auth
 def api_logs_clear():
     """Clear the log buffer."""
     app_state["logs"].clear()
@@ -875,7 +788,6 @@ def api_logs_clear():
     return jsonify({"ok": True})
 
 @app.route('/api/synced_files')
-@require_auth
 def api_synced_files():
     files = app_state["selected_files"]
     output_dir = app_state["output_dir"]
@@ -889,7 +801,6 @@ def api_synced_files():
     return jsonify({"ok": True, "files": result})
 
 @app.route('/api/download_all')
-@require_auth
 def api_download():
     """Create and send a ZIP file of all synced videos."""
     from io import BytesIO
@@ -912,12 +823,10 @@ def api_download():
     return send_file(memory_file, mimetype='application/zip', as_attachment=True, download_name="synced_videos.zip")
 
 @app.route('/video/raw/<filename>')
-@require_auth
 def serve_raw_video(filename):
     return send_from_directory(os.path.abspath(config.VIDEO_DIR), filename)
 
 @app.route('/video/synced/<filename>')
-@require_auth
 def serve_synced_video(filename):
     return send_from_directory(os.path.abspath(app_state["output_dir"]), filename)
 

@@ -41,19 +41,6 @@ pip install -r requirements.txt
 - **Audio Sync**: Uses GCC-PHAT (Generalized Cross-Correlation with Phase Transform) on extracted audio tracks for high-precision alignment.
 - **Processing**: Synchronization is applied via `ffmpeg` re-encoding (with `tpad` and `adelay`) to ensure sub-frame accuracy and compatibility across players.
 
-## Authentication
-
-The app supports optional token-based authentication. Set the `VIDEO_SYNC_TOKEN` environment variable to require a token before accessing the UI:
-
-```bash
-export VIDEO_SYNC_TOKEN="your-secret-token"
-python main.py
-```
-
-If `VIDEO_SYNC_TOKEN` is **not set**, the app runs in dev mode with no authentication.
-
-You can also set `SECRET_KEY` to provide a persistent Flask session secret (otherwise a random key is generated on each restart).
-
 ## Configuration
 
 Settings such as `SYNC_METHOD` and directory paths can be modified in `src/config.py`.
